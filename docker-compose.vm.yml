@@ -16,12 +16,18 @@
 #    ccm-dashboard sites are left untouched.
 #
 # IMPORTANT: Compose merges list fields (ports, volumes) across -f files by
-# APPENDING, not replacing. `ports: []` here does nothing on its own — the
-# base file's ports are still there underneath it. Every list we actually
-# want to clear uses the `!reset` merge tag first, then a fresh list (or
-# nothing) after it. Without `!reset` this file silently fails to remove a
-# single base-file port or bind mount — verify with `docker compose config`
-# after touching this file.
+# APPENDING, not replacing — a plain `ports: []` here does nothing, the base
+# file's ports are still there underneath it. Two merge tags fix that, and
+# they are NOT interchangeable:
+#   - `!reset` clears a field to empty and ignores anything written after it.
+#     Use it only where the field should end up with nothing at all.
+#   - `!override` replaces the base value outright with the value given here.
+#     Use it everywhere we provide an actual replacement list.
+# Mixing them up (e.g. `!reset` followed by a real list) silently drops the
+# list — the field just comes out empty. Verify with
+# `docker compose -f docker-compose.yml -f docker-compose.vm.yml config`
+# after touching this file, and check the field actually has the value
+# you expect, not just that the command didn't error.
 
 name: forewarn-ibf
 
@@ -35,7 +41,7 @@ services:
     restart: always
 
   minio:
-    ports: !reset
+    ports: !override
       - "127.0.0.1:9100:9000"   # API
       - "127.0.0.1:9101:9001"   # console, localhost only
     restart: always
@@ -43,15 +49,15 @@ services:
   api:
     build:
       target: prod
-    ports: !reset
+    ports: !override
       - "127.0.0.1:8001:8000"
-    volumes: !reset
+    volumes: !override
       - ./data:/data:ro         # the CCM cyclone database
     restart: always
     command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
 
   worker:
-    volumes: !reset
+    volumes: !override
       - ./data:/data:ro
     restart: always
 
@@ -61,7 +67,7 @@ services:
 
   ccm:
     ports: !reset []    # the portal's model-service stub; not public
-    volumes: !reset
+    volumes: !override
       - ./services/ccm/weights:/app/weights:ro
     restart: always
 
@@ -74,13 +80,13 @@ services:
         # relative paths because the host nginx serves everything on one origin.
         VITE_API_BASE_URL: /api/v1
         VITE_CCM_DASHBOARD_URL: /ccm/
-    ports: !reset
+    ports: !override
       - "127.0.0.1:5174:80"
     volumes: !reset []
     # The base file's `command: npm run dev ...` is for the dev target and has
     # no npm to run against here — target: prod is a plain nginx image. A
-    # scalar field like `command` isn't cleared by omission (unlike ports/
-    # volumes, it just carries over from the base file), so it has to be
-    # explicitly nulled out to fall back to the image's own nginx CMD.
+    # scalar field like `command` IS replaced by an override (unlike ports/
+    # volumes it doesn't need a tag), so a literal `null` unsets it and falls
+    # back to the image's own nginx CMD.
     command: null
     restart: always
