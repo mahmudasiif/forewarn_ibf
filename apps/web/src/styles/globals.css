@@ -1,0 +1,185 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* =========================================================================
+   FOREWARN design tokens — the single source of truth for the whole portal.
+   Palette and type come from the Start Bangladesh Hub Brand & Visibility
+   Manual 2026. Mirrored in Documents/08-design-guideline.md and the
+   /forewarn-design skill.
+
+   LIGHT THEME ONLY — no dark mode, no theme toggle, no prefers-color-scheme
+   branching. Do not add one back without updating the design guideline first.
+   ========================================================================= */
+
+@theme {
+  /* navy — primary, 60% of any screen */
+  --color-navy-900: #053244;
+  --color-navy-700: #3d5a73;
+  --color-navy-500: #55809d;
+  --color-navy-200: #dddde2;
+  --color-navy-50: #eff4f7;
+
+  /* green — secondary, 30% */
+  --color-green-700: #00a385;
+  --color-green-500: #36d3ae;
+  --color-green-300: #00fbbd;
+  --color-green-100: #bff9ed;
+
+  /* accent families — 10% total, categorical use only */
+  --color-sunrise-900: #b93940;
+  --color-sunrise-700: #ff603a;
+  --color-sunrise-500: #ff9263;
+  --color-sunrise-100: #f8d4d5;
+
+  --color-amber-900: #c67c00;
+  --color-amber-700: #fd9a00;
+  --color-amber-500: #ffb03d;
+  --color-amber-100: #f8e5d1;
+
+  --color-cyan-900: #008080;
+  --color-cyan-700: #009597;
+  --color-cyan-500: #00bcc2;
+  --color-cyan-100: #aaefed;
+
+  --color-violet-900: #7f4fa4;
+  --color-violet-700: #9e5fd9;
+  --color-violet-500: #af80eb;
+  --color-violet-100: #dfd2f0;
+
+  /* hazard / impact severity — built from the accent ramps above */
+  --color-severity-none: var(--color-green-700);
+  --color-severity-advisory: var(--color-amber-700);
+  --color-severity-moderate: var(--color-amber-900);
+  --color-severity-severe: var(--color-sunrise-700);
+  --color-severity-extreme: var(--color-sunrise-900);
+
+  /* categorical series for charts, in order */
+  --color-series-1: var(--color-navy-900);
+  --color-series-2: var(--color-green-700);
+  --color-series-3: var(--color-cyan-700);
+  --color-series-4: var(--color-amber-700);
+  --color-series-5: var(--color-violet-700);
+  --color-series-6: var(--color-navy-700);
+
+  /* radii & typography */
+  --radius-card: 0.75rem;
+  --font-display: "Oswald", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Roboto", "Noto Sans Bengali", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* -------------------------------------------------------------------------
+   shadcn/ui theme bridge.
+
+   shadcn components are written against a fixed set of semantic variable
+   names. Rather than restyle every component, we point those names at the
+   FOREWARN palette above — so a shadcn Button is brand navy without any
+   per-component overrides, and the brand stays defined in exactly one place.
+
+   Note the brand rule this encodes: `--destructive` is the DARKEST sunrise
+   shade, not the mid one, because white text is only permitted on navy or on
+   the darkest shade of a family.
+   ------------------------------------------------------------------------- */
+:root {
+  --radius: 0.5rem;
+
+  --background: var(--color-navy-50);
+  --foreground: var(--color-navy-900);
+
+  --card: #ffffff;
+  --card-foreground: var(--color-navy-900);
+
+  --popover: #ffffff;
+  --popover-foreground: var(--color-navy-900);
+
+  --primary: var(--color-navy-900);
+  --primary-foreground: #ffffff;
+
+  --secondary: var(--color-green-100);
+  --secondary-foreground: var(--color-navy-900);
+
+  --muted: var(--color-navy-50);
+  --muted-foreground: var(--color-navy-500);
+
+  --accent: var(--color-green-100);
+  --accent-foreground: var(--color-navy-900);
+
+  --destructive: var(--color-sunrise-900);
+  --destructive-foreground: #ffffff;
+
+  --border: var(--color-navy-200);
+  --input: var(--color-navy-200);
+  --ring: var(--color-green-700);
+
+  --chart-1: var(--color-series-1);
+  --chart-2: var(--color-series-2);
+  --chart-3: var(--color-series-3);
+  --chart-4: var(--color-series-4);
+  --chart-5: var(--color-series-5);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/40;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    margin: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  .font-display {
+    font-family: var(--font-display);
+  }
+
+  h1 {
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  h2,
+  h3 {
+    font-weight: 600;
+  }
+}
+
+@layer components {
+  /* Small supporting text — captions, table text, page numbers */
+  .text-caption {
+    font-family: var(--font-sans);
+    font-style: italic;
+    font-size: 0.75rem;
+    color: var(--muted-foreground);
+  }
+}

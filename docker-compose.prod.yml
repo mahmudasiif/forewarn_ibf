@@ -1,0 +1,52 @@
+# Production overlay:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+name: forewarn-ibf
+
+services:
+  db:
+    ports: []
+    restart: always
+
+  redis:
+    ports: []
+    restart: always
+
+  minio:
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
+    restart: always
+
+  api:
+    build: {target: prod}
+    ports: []
+    volumes: []
+    restart: always
+    command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
+
+  worker:
+    volumes: []
+    restart: always
+
+  beat:
+    volumes: []
+    restart: always
+
+  ccm:
+    ports: []
+    volumes:
+      - ./services/ccm/weights:/app/weights:ro
+    restart: always
+
+  web:
+    build: {target: prod}
+    ports: []
+    volumes: []
+    restart: always
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+    depends_on: [api, web]
+    restart: always

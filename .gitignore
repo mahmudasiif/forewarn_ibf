@@ -1,0 +1,51 @@
+# --- project brain (local only) ---
+Documents/
+
+# --- env & secrets ---
+.env
+.env.*
+!.env.example
+infra/env/*.env
+!infra/env/*.env.example
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- node ---
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+.pnpm-store/
+
+# --- model weights & data ---
+services/*/weights/*
+!services/*/weights/.gitkeep
+data/*
+!data/README.md
+*.nc
+*.grib
+*.grib2
+*.tif
+*.tiff
+
+# --- docker / runtime ---
+.docker-data/
+postgres-data/
+minio-data/
+redis-data/
+
+# --- editors / os ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
