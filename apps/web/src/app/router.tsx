@@ -48,8 +48,14 @@ const appLayout = createRoute({
 
 type Layout = typeof authLayout | typeof appLayout;
 
-const route = (parent: Layout, path: string, component: () => ReactNode) =>
-  createRoute({ getParentRoute: () => parent, path, component });
+// `path` must stay a string literal, not widen to `string`, or TanStack
+// Router loses the per-route type and every `Link to=` falls back to just
+// "/" | "." | "..". The <TPath extends string> generic is what keeps it.
+const route = <TPath extends string>(
+  parent: Layout,
+  path: TPath,
+  component: () => ReactNode,
+) => createRoute({ getParentRoute: () => parent, path, component });
 
 const routeTree = rootRoute.addChildren([
   authLayout.addChildren([route(authLayout, "/login", LoginPage)]),
