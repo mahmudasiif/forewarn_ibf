@@ -1,78 +1,115 @@
-# Production overlay for the FOREWARN model VM (10.71.1.102).
+# Standalone production compose for the FOREWARN model VM (10.71.1.102).
 #
-#   docker compose -f docker-compose.yml -f docker-compose.vm.yml up -d --build
+# This file is NOT an overlay merged with docker-compose.yml — it fully
+# defines every service on its own. It was originally written as an overlay
+# (`-f docker-compose.yml -f docker-compose.vm.yml`), using the Compose merge
+# tags `!reset`/`!override` to clear the base file's dev-only ports and
+# commands. Twice, that produced an empty `ports:` for every affected
+# service instead of the intended value — api, web, minio and ccm all came
+# out with no port published to the host at all, which would have made the
+# whole deployment unreachable. Rather than keep chasing why the merge tags
+# behaved that way, this file drops merging entirely: what's written here is
+# exactly what runs on the VM, nothing inherited, nothing to accidentally
+# lose in a merge.
 #
-# Two things make this different from the generic prod overlay:
+# Run with:
+#   docker compose -f docker-compose.vm.yml up -d --build
 #
-# 1. The VM already runs nginx on :80 and already has PostgreSQL, Redis and
-#    MySQL on localhost. Publishing our own copies on the default ports would
-#    collide with them. So nothing here publishes a default port, and the
-#    database, cache and object store are not published at all — they are
-#    reachable only from inside the compose network.
-#
-# 2. The VM's own nginx is the single front door. We do NOT run an nginx
-#    container. Our two web-facing services bind to 127.0.0.1 on unusual
-#    ports, and the host nginx proxies to them. The existing default and
-#    ccm-dashboard sites are left untouched.
-#
-# IMPORTANT: Compose merges list fields (ports, volumes) across -f files by
-# APPENDING, not replacing — a plain `ports: []` here does nothing, the base
-# file's ports are still there underneath it. Two merge tags fix that, and
-# they are NOT interchangeable:
-#   - `!reset` clears a field to empty and ignores anything written after it.
-#     Use it only where the field should end up with nothing at all.
-#   - `!override` replaces the base value outright with the value given here.
-#     Use it everywhere we provide an actual replacement list.
-# Mixing them up (e.g. `!reset` followed by a real list) silently drops the
-# list — the field just comes out empty. Verify with
-# `docker compose -f docker-compose.yml -f docker-compose.vm.yml config`
-# after touching this file, and check the field actually has the value
-# you expect, not just that the command didn't error.
+# Local dev is untouched by this — `make up` / plain `docker compose up`
+# only ever reads docker-compose.yml, never this file.
 
 name: forewarn-ibf
 
 services:
   db:
-    ports: !reset []    # internal only — the VM already has Postgres on 5432
+    image: postgis/postgis:18-3.6
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./infra/docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: always
+    # No ports: — internal only. The VM already has its own Postgres on 5432.
 
   redis:
-    ports: !reset []    # internal only — the VM already has Redis on 6379
+    image: redis:7-alpine
+    volumes: [redis-data:/data]
     restart: always
+    # No ports: — internal only. The VM already has its own Redis on 6379.
 
   minio:
-    ports: !override
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    ports:
       - "127.0.0.1:9100:9000"   # API
       - "127.0.0.1:9101:9001"   # console, localhost only
+    volumes: [minio-data:/data]
     restart: always
 
   api:
     build:
+      context: ./apps/api
+      dockerfile: Dockerfile
       target: prod
-    ports: !override
+    env_file: [.env]
+    ports:
       - "127.0.0.1:8001:8000"
-    volumes: !override
+    volumes:
       - ./data:/data:ro         # the CCM cyclone database
-    restart: always
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
     command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
+    restart: always
 
   worker:
-    volumes: !override
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    env_file: [.env]
+    volumes:
       - ./data:/data:ro
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_started}
+    command: celery -A app.celery_app worker -l info
     restart: always
 
   beat:
-    volumes: !reset []
+    build:
+      context: ./services/worker
+      dockerfile: Dockerfile
+    env_file: [.env]
+    depends_on: [redis]
+    command: celery -A app.celery_app beat -l info
     restart: always
+    # No dev bind mount and no data mount — beat only schedules jobs, it
+    # doesn't need the source tree or the cyclone data at runtime.
 
   ccm:
-    ports: !reset []    # the portal's model-service stub; not public
-    volumes: !override
+    build:
+      context: ./services/ccm
+      dockerfile: Dockerfile
+    env_file: [.env]
+    volumes:
       - ./services/ccm/weights:/app/weights:ro
     restart: always
+    # No ports: — the portal's model-service stub; not public.
 
   web:
     build:
+      context: ./apps/web
+      dockerfile: Dockerfile
       target: prod
       args:
         # Baked in at build time — Vite inlines these into the bundle, so they
@@ -80,13 +117,14 @@ services:
         # relative paths because the host nginx serves everything on one origin.
         VITE_API_BASE_URL: /api/v1
         VITE_CCM_DASHBOARD_URL: /ccm/
-    ports: !override
+    env_file: [.env]
+    ports:
       - "127.0.0.1:5174:80"
-    volumes: !reset []
-    # The base file's `command: npm run dev ...` is for the dev target and has
-    # no npm to run against here — target: prod is a plain nginx image. A
-    # scalar field like `command` IS replaced by an override (unlike ports/
-    # volumes it doesn't need a tag), so a literal `null` unsets it and falls
-    # back to the image's own nginx CMD.
-    command: null
     restart: always
+    # No command: — target: prod is a plain nginx image; it runs its own
+    # CMD from the Dockerfile, not a dev server.
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
