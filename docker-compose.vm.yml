@@ -77,4 +77,10 @@ services:
     ports: !reset
       - "127.0.0.1:5174:80"
     volumes: !reset []
+    # The base file's `command: npm run dev ...` is for the dev target and has
+    # no npm to run against here — target: prod is a plain nginx image. A
+    # scalar field like `command` isn't cleared by omission (unlike ports/
+    # volumes, it just carries over from the base file), so it has to be
+    # explicitly nulled out to fall back to the image's own nginx CMD.
+    command: null
     restart: always
