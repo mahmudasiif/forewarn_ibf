@@ -14,20 +14,28 @@
 #    container. Our two web-facing services bind to 127.0.0.1 on unusual
 #    ports, and the host nginx proxies to them. The existing default and
 #    ccm-dashboard sites are left untouched.
+#
+# IMPORTANT: Compose merges list fields (ports, volumes) across -f files by
+# APPENDING, not replacing. `ports: []` here does nothing on its own — the
+# base file's ports are still there underneath it. Every list we actually
+# want to clear uses the `!reset` merge tag first, then a fresh list (or
+# nothing) after it. Without `!reset` this file silently fails to remove a
+# single base-file port or bind mount — verify with `docker compose config`
+# after touching this file.
 
 name: forewarn-ibf
 
 services:
   db:
-    ports: []          # internal only — the VM already has Postgres on 5432
+    ports: !reset []    # internal only — the VM already has Postgres on 5432
     restart: always
 
   redis:
-    ports: []          # internal only — the VM already has Redis on 6379
+    ports: !reset []    # internal only — the VM already has Redis on 6379
     restart: always
 
   minio:
-    ports:
+    ports: !reset
       - "127.0.0.1:9100:9000"   # API
       - "127.0.0.1:9101:9001"   # console, localhost only
     restart: always
@@ -35,25 +43,25 @@ services:
   api:
     build:
       target: prod
-    ports:
+    ports: !reset
       - "127.0.0.1:8001:8000"
-    volumes:
+    volumes: !reset
       - ./data:/data:ro         # the CCM cyclone database
     restart: always
     command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
 
   worker:
-    volumes:
+    volumes: !reset
       - ./data:/data:ro
     restart: always
 
   beat:
-    volumes: []
+    volumes: !reset []
     restart: always
 
   ccm:
-    ports: []          # the portal's model-service stub; not public
-    volumes:
+    ports: !reset []    # the portal's model-service stub; not public
+    volumes: !reset
       - ./services/ccm/weights:/app/weights:ro
     restart: always
 
@@ -66,7 +74,7 @@ services:
         # relative paths because the host nginx serves everything on one origin.
         VITE_API_BASE_URL: /api/v1
         VITE_CCM_DASHBOARD_URL: /ccm/
-    ports:
+    ports: !reset
       - "127.0.0.1:5174:80"
-    volumes: []
+    volumes: !reset []
     restart: always
