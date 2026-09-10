@@ -1,5 +1,6 @@
 # --- project brain (local only) ---
 Documents/
+Claude outputs/
 
 # --- env & secrets ---
 .env
