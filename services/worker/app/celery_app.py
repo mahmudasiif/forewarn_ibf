@@ -13,7 +13,12 @@ celery_app = Celery(
     "forewarn",
     broker=os.getenv("CELERY_BROKER_URL", "redis://redis:6379/1"),
     backend=os.getenv("CELERY_RESULT_BACKEND", "redis://redis:6379/2"),
-    include=["app.jobs.ingestion", "app.jobs.model_runs", "app.jobs.alerts"],
+    include=[
+        "app.jobs.ingestion",
+        "app.jobs.model_runs",
+        "app.jobs.alerts",
+        "app.jobs.preparedness",
+    ],
 )
 
 celery_app.conf.update(

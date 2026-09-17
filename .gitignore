@@ -2,6 +2,10 @@
 Documents/
 Claude outputs/
 
+# --- local tooling / vendored source drops (never commit) ---
+graphify-out/
+Cyclone-AI-Guideline-Handover/
+
 # --- env & secrets ---
 .env
 .env.*
@@ -30,6 +34,8 @@ build/
 # --- model weights & data ---
 services/*/weights/*
 !services/*/weights/.gitkeep
+services/preparedness/assets/*
+!services/preparedness/assets/.gitkeep
 data/*
 !data/README.md
 *.nc

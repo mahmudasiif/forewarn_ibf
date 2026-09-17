@@ -1,0 +1,9 @@
+# Assets are large (~200 MB) and mounted read-only at runtime — never bake them
+# into the image or ship them in the build context.
+assets/
+
+__pycache__/
+*.pyc
+.venv/
+.env
+.cyclone-service.log

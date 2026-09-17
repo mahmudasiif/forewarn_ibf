@@ -15,6 +15,7 @@ if config.config_file_name:
 target_metadata = Base.metadata
 SCHEMAS = (
     "auth", "geo", "hazard", "impact", "models", "ccm", "alerts", "content", "ops",
+    "preparedness",
 )
 
 

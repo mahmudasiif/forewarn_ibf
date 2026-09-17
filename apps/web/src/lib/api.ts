@@ -2,7 +2,9 @@ import axios from "axios";
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000/api/v1",
-  headers: { "Content-Type": "application/json" },
+  // No global Content-Type: axios sets application/json for object bodies and
+  // multipart/form-data (with boundary) for FormData uploads. Forcing JSON here
+  // breaks file uploads — the boundary is dropped and the server sees no fields.
 });
 
 api.interceptors.request.use((config) => {

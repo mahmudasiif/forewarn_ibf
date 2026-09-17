@@ -66,6 +66,7 @@ services:
       - "127.0.0.1:8001:8000"
     volumes:
       - ./data:/data:ro         # the CCM cyclone database
+      - prep-runs:/runs:ro      # shared with worker/preparedness for on-demand area maps
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
@@ -79,6 +80,7 @@ services:
     env_file: [.env]
     volumes:
       - ./data:/data:ro
+      - prep-runs:/runs
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
@@ -106,6 +108,17 @@ services:
     restart: always
     # No ports: — the portal's model-service stub; not public.
 
+  preparedness:
+    build:
+      context: ./services/preparedness
+      dockerfile: Dockerfile
+    env_file: [.env]
+    volumes:
+      - ./services/preparedness/assets:/app/assets:ro
+      - prep-runs:/runs
+    restart: always
+    # No ports: — internal model service, reached only by the worker.
+
   web:
     build:
       context: ./apps/web
@@ -128,3 +141,4 @@ volumes:
   postgres-data:
   redis-data:
   minio-data:
+  prep-runs:

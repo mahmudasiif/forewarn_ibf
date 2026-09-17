@@ -41,6 +41,7 @@ services:
     volumes:
       - ./apps/api:/app
       - ./data:/data:ro
+      - prep-runs:/runs:ro
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
@@ -53,6 +54,7 @@ services:
     env_file: [.env]
     volumes:
       - ./services/worker:/app
+      - prep-runs:/runs
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}
@@ -78,6 +80,17 @@ services:
       - ./services/ccm:/app
       - ./services/ccm/weights:/app/weights:ro
 
+  preparedness:
+    build:
+      context: ./services/preparedness
+      dockerfile: Dockerfile
+    env_file: [.env]
+    ports: ["8102:8000"]
+    volumes:
+      - ./services/preparedness:/app
+      - ./services/preparedness/assets:/app/assets:ro
+      - prep-runs:/runs
+
   web:
     build:
       context: ./apps/web
@@ -94,3 +107,4 @@ volumes:
   postgres-data:
   redis-data:
   minio-data:
+  prep-runs:

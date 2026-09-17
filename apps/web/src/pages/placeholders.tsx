@@ -61,25 +61,6 @@ export function CycloneTrackPage() {
   );
 }
 
-export function PreparednessGuidancePage() {
-  return (
-    <UnderDevelopment
-      title="Cyclone Preparedness Guidance"
-      module="Module 3"
-      description="Estimates cyclone impact by district, upazila and union, then writes guidance for it."
-      phase="Phase 3"
-      scope={[
-        "Takes Excel, CSV, netCDF and raster input",
-        "Union and thana-wise impact forecasts",
-        "Table and map views",
-        "Filter, search, browse past runs",
-        "Guidance text written by an LLM",
-        "Audit trail",
-      ]}
-    />
-  );
-}
-
 export function FloodRiskPage() {
   return (
     <UnderDevelopment

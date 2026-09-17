@@ -10,6 +10,7 @@ from app.modules.hazards.router import router as hazards_router
 from app.modules.health.router import router as health_router
 from app.modules.impact.router import router as impact_router
 from app.modules.models.router import router as models_router
+from app.modules.preparedness.router import router as preparedness_router
 from app.modules.reports.router import router as reports_router
 from app.modules.users.router import router as users_router
 
@@ -25,6 +26,7 @@ for r in (
     impact_router,
     models_router,
     ccm_router,
+    preparedness_router,
     alerts_router,
     reports_router,
 ):

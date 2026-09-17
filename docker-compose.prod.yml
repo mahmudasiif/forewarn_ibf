@@ -17,12 +17,14 @@ services:
   api:
     build: {target: prod}
     ports: []
-    volumes: []
+    volumes:
+      - prep-runs:/runs:ro
     restart: always
     command: gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000
 
   worker:
-    volumes: []
+    volumes:
+      - prep-runs:/runs
     restart: always
 
   beat:
@@ -33,6 +35,13 @@ services:
     ports: []
     volumes:
       - ./services/ccm/weights:/app/weights:ro
+    restart: always
+
+  preparedness:
+    ports: []
+    volumes:
+      - ./services/preparedness/assets:/app/assets:ro
+      - prep-runs:/runs
     restart: always
 
   web:

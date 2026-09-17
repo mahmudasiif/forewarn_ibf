@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     CCM_SERVICE_URL: str = "http://ccm:8000"
     MODEL_REQUEST_TIMEOUT: int = 120
 
+    # preparedness guidance model (Module 3) — runs are long (GIS + maps + LLM),
+    # so it gets its own generous timeout separate from the default.
+    PREPAREDNESS_SERVICE_URL: str = "http://preparedness:8000"
+    PREPAREDNESS_REQUEST_TIMEOUT: int = 1200
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
