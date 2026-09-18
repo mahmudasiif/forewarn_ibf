@@ -119,6 +119,16 @@ services:
     restart: always
     # No ports: — internal model service, reached only by the worker.
 
+  dfrm:
+    build:
+      context: ./services/dfrm
+      dockerfile: Dockerfile
+    env_file: [.env]
+    volumes:
+      - ./services/dfrm/assets:/app/assets:ro
+    restart: always
+    # No ports: — internal model service, reached only by the API.
+
   web:
     build:
       context: ./apps/web

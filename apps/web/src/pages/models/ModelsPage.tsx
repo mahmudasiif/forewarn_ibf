@@ -1,12 +1,23 @@
 import { Link } from "@tanstack/react-router";
+import { format } from "date-fns";
 import { ArrowUpRight } from "lucide-react";
 
 import { Card } from "@/components/shared/Card";
 import { DataTable, type Column } from "@/components/shared/DataTable";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusDot } from "@/components/shared/StatusDot";
+import { useDfrmRuns } from "@/lib/dfrmApi";
 import { MODELS, MODEL_RUNS, type ModelRun } from "@/lib/mock";
 import { cn } from "@/lib/utils";
+
+/** Mock run dates are like "09 Sep 2026, 05:40" — match that for real rows. */
+function fmtRunTime(iso: string): string {
+  try {
+    return format(new Date(iso), "dd MMM yyyy, HH:mm");
+  } catch {
+    return iso;
+  }
+}
 
 const runColumns: Column<ModelRun>[] = [
   { key: "id", header: "Run", render: (row) => <span className="font-mono text-xs">{row.id}</span> },
@@ -34,6 +45,24 @@ const runColumns: Column<ModelRun>[] = [
 ];
 
 export default function ModelsPage() {
+  // DFRM is the one model with a live query history; fold its real runs in.
+  const dfrmRuns = useDfrmRuns(50);
+  const dfrmLastRun = dfrmRuns.data?.[0] ? fmtRunTime(dfrmRuns.data[0].created_at) : null;
+
+  const lastRunFor = (id: string, fallback: string): string =>
+    id === "dfrm" && dfrmLastRun ? dfrmLastRun : fallback;
+
+  const dfrmRunRows: ModelRun[] = (dfrmRuns.data ?? []).map((r) => ({
+    id: `dfrm-${r.id}`,
+    model: `DFRM · ${r.kind === "warning" ? "Warning" : "Map"} · ${r.area_name}`,
+    trigger: "manual",
+    status: "succeeded",
+    startedAt: fmtRunTime(r.created_at),
+    duration: "—",
+    triggeredBy: "—",
+  }));
+  const runRows: ModelRun[] = [...dfrmRunRows, ...MODEL_RUNS];
+
   return (
     <>
       <PageHeader
@@ -70,7 +99,7 @@ export default function ModelsPage() {
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-navy-500">Last run</dt>
-                  <dd className="tabular-nums text-navy-900">{model.lastRun}</dd>
+                  <dd className="tabular-nums text-navy-900">{lastRunFor(model.id, model.lastRun)}</dd>
                 </div>
               </dl>
 
@@ -87,7 +116,7 @@ export default function ModelsPage() {
           subtitle="Across all registered models"
           bodyClassName="p-0"
         >
-          <DataTable columns={runColumns} rows={MODEL_RUNS} rowKey={(row) => row.id} />
+          <DataTable columns={runColumns} rows={runRows} rowKey={(row) => row.id} />
         </Card>
       </div>
     </>

@@ -44,6 +44,12 @@ services:
       - prep-runs:/runs
     restart: always
 
+  dfrm:
+    ports: []
+    volumes:
+      - ./services/dfrm/assets:/app/assets:ro
+    restart: always
+
   web:
     build: {target: prod}
     ports: []

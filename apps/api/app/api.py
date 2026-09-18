@@ -5,6 +5,7 @@ from app.modules.admin.router import router as admin_router
 from app.modules.alerts.router import router as alerts_router
 from app.modules.auth.router import router as auth_router
 from app.modules.ccm.router import router as ccm_router
+from app.modules.dfrm.router import router as dfrm_router
 from app.modules.geo.router import router as geo_router
 from app.modules.hazards.router import router as hazards_router
 from app.modules.health.router import router as health_router
@@ -27,6 +28,7 @@ for r in (
     models_router,
     ccm_router,
     preparedness_router,
+    dfrm_router,
     alerts_router,
     reports_router,
 ):

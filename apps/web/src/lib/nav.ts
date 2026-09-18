@@ -67,7 +67,7 @@ export const NAV: NavSection[] = [
           { label: "CCM — Cyclone Classifier", to: "/models/ccm", module: "5", icon: Waves, live: true },
           { label: "Cyclone Track", to: "/models/cyclone-track", module: "2", icon: Wind },
           { label: "Preparedness Guidance", to: "/models/preparedness", module: "3", icon: Radio, live: true },
-          { label: "Flood Risk (DFRM)", to: "/models/flood-risk", module: "7", icon: Waves },
+          { label: "Flood Risk (DFRM)", to: "/models/flood-risk", module: "7", icon: Waves, live: true },
           { label: "Weather Nowcasting", to: "/models/nowcasting", module: "9", icon: CloudSun },
           { label: "All models & runs", to: "/models", icon: Boxes },
         ],

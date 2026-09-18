@@ -5,6 +5,12 @@ Claude outputs/
 # --- local tooling / vendored source drops (never commit) ---
 graphify-out/
 Cyclone-AI-Guideline-Handover/
+DFRM/
+GIS Layers/
+CCM/
+
+# stray root lockfile (there is no root package.json — the app lives in apps/web)
+/package-lock.json
 
 # --- env & secrets ---
 .env
@@ -36,6 +42,8 @@ services/*/weights/*
 !services/*/weights/.gitkeep
 services/preparedness/assets/*
 !services/preparedness/assets/.gitkeep
+services/dfrm/assets/*
+!services/dfrm/assets/.gitkeep
 data/*
 !data/README.md
 *.nc

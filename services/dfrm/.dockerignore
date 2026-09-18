@@ -1,0 +1,8 @@
+# Reference data (~20 MB) is mounted read-only at runtime — never bake it into
+# the image or ship it in the build context.
+assets/
+
+__pycache__/
+*.pyc
+.venv/
+.env

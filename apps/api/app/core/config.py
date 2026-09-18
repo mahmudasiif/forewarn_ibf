@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     PREPAREDNESS_SERVICE_URL: str = "http://preparedness:8000"
     PREPAREDNESS_REQUEST_TIMEOUT: int = 1200
 
+    # DFRM flood-risk model (Module 7) — stateless GeoJSON/warning queries; the
+    # first request per layer warms a GIS cache, so allow a little headroom.
+    DFRM_SERVICE_URL: str = "http://dfrm:8000"
+    DFRM_REQUEST_TIMEOUT: int = 180
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

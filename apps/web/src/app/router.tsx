@@ -17,13 +17,13 @@ import ActivityTrackingPage from "@/pages/ActivityTrackingPage";
 import ModelsPage from "@/pages/models/ModelsPage";
 import CCMPage from "@/pages/models/CCMPage";
 import PreparednessPage from "@/pages/models/PreparednessPage";
+import DFRMPage from "@/pages/models/DFRMPage";
 import {
   AdminSettingsPage,
   AdminUsersPage,
   AnalyticsPage,
   CycloneTrackPage,
   EarlyWarningPage,
-  FloodRiskPage,
   LegacyDataPage,
   NotFoundPage,
   NowcastingPage,
@@ -72,7 +72,7 @@ const routeTree = rootRoute.addChildren([
     route(appLayout, "/models/ccm", CCMPage),
     route(appLayout, "/models/cyclone-track", CycloneTrackPage),
     route(appLayout, "/models/preparedness", PreparednessPage),
-    route(appLayout, "/models/flood-risk", FloodRiskPage),
+    route(appLayout, "/models/flood-risk", DFRMPage),
     route(appLayout, "/models/nowcasting", NowcastingPage),
 
     // Programme
