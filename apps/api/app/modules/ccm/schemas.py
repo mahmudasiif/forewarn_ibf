@@ -103,3 +103,12 @@ class MapResponse(BaseModel):
     metric_min: float | None = None
     metric_max: float | None = None
     feature_count: int = 0
+
+
+class BoundaryResponse(BaseModel):
+    """District or division outlines, as GeoJSON lines, for the map overlay."""
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[dict[str, Any]]
+    level: str
+    feature_count: int = 0

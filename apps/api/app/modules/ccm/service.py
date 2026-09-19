@@ -239,6 +239,15 @@ async def map_features(
 
     Geometry is simplified server-side — union boundaries at full precision are
     ~40 MB of GeoJSON, which no browser should be asked to swallow.
+
+    The simplification has to be coverage-aware. ST_SimplifyPreserveTopology
+    only preserves topology *within* one geometry; run per row, two neighbours
+    drop different vertices along the border they share and the map renders a
+    thin crack between them along every boundary. ST_CoverageSimplify treats
+    the whole result set as one coverage and simplifies each shared edge once,
+    so neighbours keep matching borders. It is a window function, hence the
+    OVER () — the window is the set of rows this query returns, which is
+    exactly the coverage being drawn.
     """
     cyclone = await get_cyclone(db, code)
     chosen = metric_registry.resolve(metric)
@@ -255,6 +264,12 @@ async def map_features(
         where += f" AND r.{chosen.key} {_OPERATOR_SQL[operator]} :threshold"
         params["threshold"] = threshold
 
+    geom_sql = (
+        "ST_CoverageSimplify(u.geom, :simplify) OVER ()"
+        if params["simplify"] > 0
+        else "u.geom"
+    )
+
     rows = await db.execute(
         text(
             f"""
@@ -263,9 +278,7 @@ async def map_features(
                    r.{chosen.key} AS value,
                    r.risk_pct, r.hazard_pct, r.vulnerability_pct,
                    r.wind_speed_kmh, r.surge_height_m, r.affected_people,
-                   ST_AsGeoJSON(
-                       ST_SimplifyPreserveTopology(u.geom, :simplify), 5
-                   ) AS geometry
+                   ST_AsGeoJSON({geom_sql}, 5) AS geometry
             FROM ccm.results r
             JOIN ccm.unions u ON u.union_geo = r.union_geo
             WHERE {where}
@@ -314,5 +327,88 @@ async def map_features(
         "metric_unit": chosen.unit,
         "metric_min": lo,
         "metric_max": hi,
+        "feature_count": len(features),
+    }
+
+
+async def boundaries(
+    db: AsyncSession,
+    *,
+    code: str,
+    level: str = "district",
+    division: str | None = None,
+    district: str | None = None,
+    upazila: str | None = None,
+    simplify: float = 0.002,
+) -> dict:
+    """District or division outlines, as GeoJSON lines.
+
+    Dissolved from the very same union polygons the choropleth is drawn from,
+    rather than loaded from a separate district/division shapefile. Two
+    boundary datasets never agree to the metre, and an outline that misses its
+    own fill by a few pixels looks like a bug. Dissolving guarantees the line
+    sits exactly on the edge of the unions it encloses.
+
+    Returned as boundary lines, not filled polygons, so the layer can sit above
+    the choropleth without hiding it.
+    """
+    cyclone = await get_cyclone(db, code)
+    if level not in ("district", "division"):
+        raise NotFoundError(f"Unsupported boundary level: {level}")
+
+    params: dict[str, Any] = {
+        "cyclone_id": cyclone["id"],
+        "division": division,
+        "district": district,
+        "upazila": upazila,
+        "simplify": max(0.0, min(simplify, 0.05)),
+    }
+    where = _filters(params)
+
+    # Simplify the dissolved coverage, not each outline on its own, so two
+    # neighbouring districts keep the single shared line between them.
+    geom_sql = (
+        "ST_CoverageSimplify(geom, :simplify) OVER ()"
+        if params["simplify"] > 0
+        else "geom"
+    )
+
+    rows = await db.execute(
+        text(
+            f"""
+            WITH merged AS (
+                SELECT r.{level} AS name,
+                       ST_UnaryUnion(ST_Collect(u.geom)) AS geom
+                FROM ccm.results r
+                JOIN ccm.unions u ON u.union_geo = r.union_geo
+                WHERE {where}
+                GROUP BY r.{level}
+            ), simplified AS (
+                SELECT name, {geom_sql} AS geom FROM merged
+            )
+            SELECT name, ST_AsGeoJSON(ST_Boundary(geom), 5) AS geometry
+            FROM simplified
+            WHERE geom IS NOT NULL
+            """
+        ),
+        params,
+    )
+
+    import json
+
+    features = [
+        {
+            "type": "Feature",
+            "id": row["name"],
+            "geometry": json.loads(row["geometry"]),
+            "properties": {"name": row["name"], "level": level},
+        }
+        for row in rows.mappings()
+        if row["geometry"]
+    ]
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "level": level,
         "feature_count": len(features),
     }

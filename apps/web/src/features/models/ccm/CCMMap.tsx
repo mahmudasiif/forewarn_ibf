@@ -5,7 +5,7 @@ import L, { type LeafletMouseEvent, type Path, type PathOptions } from "leaflet"
 import "leaflet/dist/leaflet.css";
 
 import { buildBuckets, colorFor, formatValue, NO_DATA_COLOR } from "./colorScale";
-import type { MapResponse } from "@/lib/ccmApi";
+import type { BoundaryResponse, MapResponse } from "@/lib/ccmApi";
 
 /** Coastal Bangladesh — the extent the CCM reports on. */
 const CENTER: [number, number] = [22.2, 90.2];
@@ -29,6 +29,34 @@ type CCMMapProps = {
   data: MapResponse | undefined;
   loading: boolean;
   onSelect?: (properties: Record<string, unknown>) => void;
+  /** District outlines, drawn over the choropleth to separate the areas. */
+  districts?: BoundaryResponse;
+  /** Division outlines — heavier, since a division contains many districts. */
+  divisions?: BoundaryResponse;
+};
+
+/**
+ * Administrative outlines sit in their own pane between the choropleth (400)
+ * and the place-name labels (450), and never take pointer events, so hovering
+ * a union still hits the union and not the line drawn on top of it.
+ */
+const BOUNDARY_PANE_Z = 440;
+
+/** Navy, per the brand palette. Division reads heavier than district. */
+const DISTRICT_LINE: PathOptions = {
+  color: "#053244",
+  weight: 1.2,
+  opacity: 0.55,
+  fill: false,
+  interactive: false,
+};
+
+const DIVISION_LINE: PathOptions = {
+  color: "#053244",
+  weight: 2.4,
+  opacity: 0.85,
+  fill: false,
+  interactive: false,
 };
 
 /** Zoom to whatever is currently shown, so drilling into a district reframes. */
@@ -52,7 +80,13 @@ function FitToData({ data }: { data: MapResponse | undefined }) {
   return null;
 }
 
-export function CCMMap({ data, loading, onSelect }: CCMMapProps) {
+export function CCMMap({
+  data,
+  loading,
+  onSelect,
+  districts,
+  divisions,
+}: CCMMapProps) {
   const buckets = useMemo(
     () => buildBuckets(data?.metric_unit ?? "", data?.metric_min ?? null, data?.metric_max ?? null),
     [data?.metric_unit, data?.metric_min, data?.metric_max],
@@ -120,6 +154,28 @@ export function CCMMap({ data, loading, onSelect }: CCMMapProps) {
             onEachFeature={onEachFeature as never}
           />
         )}
+
+        {/* District and division outlines. Re-keyed on feature_count so
+            Leaflet redraws them when the filtered area changes. */}
+        <Pane
+          name="admin-boundaries"
+          style={{ zIndex: BOUNDARY_PANE_Z, pointerEvents: "none" }}
+        >
+          {districts && districts.features.length > 0 && (
+            <GeoJSON
+              key={`district-${districts.feature_count}`}
+              data={districts as never}
+              style={() => DISTRICT_LINE}
+            />
+          )}
+          {divisions && divisions.features.length > 0 && (
+            <GeoJSON
+              key={`division-${divisions.feature_count}`}
+              data={divisions as never}
+              style={() => DIVISION_LINE}
+            />
+          )}
+        </Pane>
 
         {/* Place names sit above the choropleth so they stay readable.
             Clicks pass straight through to the unions underneath. */}

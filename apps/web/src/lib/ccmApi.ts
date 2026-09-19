@@ -69,6 +69,15 @@ export type MapResponse = {
   feature_count: number;
 };
 
+export type BoundaryLevel = "district" | "division";
+
+export type BoundaryResponse = {
+  type: "FeatureCollection";
+  features: Feature[];
+  level: BoundaryLevel;
+  feature_count: number;
+};
+
 /** The controls on the CCM screen, mirroring the desktop tool's input panel. */
 export type CCMFilters = {
   cyclone: string;
@@ -125,6 +134,8 @@ export const ccmKeys = {
     ["ccm", "locations", code, level, parent ?? null] as const,
   results: (f: CCMFilters, page: number) => ["ccm", "results", f, page] as const,
   map: (f: CCMFilters) => ["ccm", "map", f] as const,
+  boundaries: (code: string, level: BoundaryLevel, f: CCMFilters) =>
+    ["ccm", "boundaries", code, level, f.division, f.district, f.upazila] as const,
 };
 
 export function useMetrics() {
@@ -205,6 +216,34 @@ export function useMapData(filters: CCMFilters, enabled = true) {
         })
       ).data,
     enabled: enabled && Boolean(filters.cyclone),
+    placeholderData: (previous) => previous,
+  });
+}
+
+/**
+ * District or division outlines for the map overlay.
+ *
+ * Kept as its own query rather than folded into the map call: the outlines
+ * depend only on the area in view, not on the metric or the trigger, so they
+ * stay cached while you flip between metrics. The dissolve behind this is the
+ * slow part of the map, so not re-fetching it on every metric change matters.
+ */
+export function useBoundaries(
+  filters: CCMFilters,
+  level: BoundaryLevel,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ccmKeys.boundaries(filters.cyclone, level, filters),
+    queryFn: async () =>
+      (
+        await api.get<BoundaryResponse>(
+          `/ccm/cyclones/${filters.cyclone}/boundaries`,
+          { params: { level, ...locationParams(filters), simplify: 0.002 } },
+        )
+      ).data,
+    enabled: enabled && Boolean(filters.cyclone),
+    staleTime: 10 * 60_000,
     placeholderData: (previous) => previous,
   });
 }

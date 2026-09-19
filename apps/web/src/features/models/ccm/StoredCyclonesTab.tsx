@@ -7,6 +7,7 @@ import { StatTile } from "@/components/shared/StatTile";
 import {
   DEFAULT_FILTERS,
   resultsCsvUrl,
+  useBoundaries,
   useCyclone,
   useCyclones,
   useMapData,
@@ -44,6 +45,19 @@ export function StoredCyclonesTab() {
   const detail = useCyclone(applied?.cyclone ?? null);
   const results = useResults(applied ?? ({} as CCMFilters), page);
   const mapData = useMapData(applied ?? ({} as CCMFilters), Boolean(applied));
+  // Outlines to separate the administrative areas on the map. Divisions are
+  // only drawn while looking at more than one — once a division is picked its
+  // outline is just the edge of the data, which the district lines already show.
+  const districtLines = useBoundaries(
+    applied ?? ({} as CCMFilters),
+    "district",
+    Boolean(applied),
+  );
+  const divisionLines = useBoundaries(
+    applied ?? ({} as CCMFilters),
+    "division",
+    Boolean(applied) && !applied?.division,
+  );
 
   if (cyclones.isLoading || metrics.isLoading || !applied || !draft) {
     return (
@@ -149,7 +163,13 @@ export function StoredCyclonesTab() {
           }
         >
           <div className="h-[520px] w-full">
-            <CCMMap data={mapData.data} loading={mapData.isFetching} onSelect={setSelected} />
+            <CCMMap
+              data={mapData.data}
+              loading={mapData.isFetching}
+              onSelect={setSelected}
+              districts={districtLines.data}
+              divisions={divisionLines.data}
+            />
           </div>
         </Card>
 

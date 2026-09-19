@@ -15,6 +15,7 @@ from app.modules.ccm import metrics as metric_registry
 from app.modules.ccm import service
 from app.modules.ccm.schemas import (
     AdminLevel,
+    BoundaryResponse,
     CycloneDetail,
     CycloneSummary,
     LocationOption,
@@ -108,6 +109,28 @@ async def get_map(
         upazila=upazila,
         operator=operator,
         threshold=threshold,
+        simplify=simplify,
+    )
+
+
+@router.get("/cyclones/{code}/boundaries", response_model=BoundaryResponse)
+async def get_boundaries(
+    code: str,
+    db: DbSession,
+    level: Annotated[str, Query(pattern="^(district|division)$")] = "district",
+    division: str | None = None,
+    district: str | None = None,
+    upazila: str | None = None,
+    simplify: float = 0.002,
+) -> dict:
+    """District or division outlines for the map, dissolved from the unions."""
+    return await service.boundaries(
+        db,
+        code=code,
+        level=level,
+        division=division,
+        district=district,
+        upazila=upazila,
         simplify=simplify,
     )
 

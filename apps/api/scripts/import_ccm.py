@@ -125,11 +125,34 @@ def read_cyclone_list(data_dir: Path) -> dict[str, dict]:
     return index
 
 
-async def import_unions(session, data_dir: Path) -> int:
+# Boundary layers, in the order we prefer them.
+#
+# CCM_Unions_BBS21 is the default because the CCM package's own layer has the
+# river channels cut out of it — its unions do not touch each other, so the
+# choropleth renders with white gaps along every river. Dissolving Bagerhat's
+# 80 unions from the shipped layer gives 17 disconnected pieces; the BBS21
+# version gives 1, and about 12% more area, which is the water.
+#
+# CCM_Unions_BBS21 is built from the BBS 2021 union layer by assigning each
+# BBS21 polygon to the CCM union it mostly falls inside, then dissolving. It
+# keeps the same Union_Geo key and the same 1,585 rows, so it is a drop-in
+# swap. 103 unions in the Meghna estuary (chars, where the two boundary
+# vintages genuinely disagree) fall back to the original CCM geometry and are
+# marked src='ccm-original' in the shapefile.
+UNION_LAYERS = ("CCM_Unions_BBS21", "CCM_Unions_wgs84")
+
+
+async def import_unions(session, data_dir: Path, layer: str | None = None) -> int:
     """Load the union boundaries. Idempotent — re-running refreshes geometry."""
-    base = data_dir / "Shapefiles" / "CCM_Unions_wgs84"
-    if not base.with_suffix(".shp").exists():
-        raise SystemExit(f"Union shapefile not found at {base}.shp")
+    shapes_dir = data_dir / "Shapefiles"
+    for name in ([layer] if layer else UNION_LAYERS):
+        base = shapes_dir / name
+        if base.with_suffix(".shp").exists():
+            print(f"  boundary layer: {name}")
+            break
+    else:
+        tried = ", ".join(layer and [layer] or UNION_LAYERS)
+        raise SystemExit(f"No union shapefile found in {shapes_dir} (tried: {tried})")
 
     reader = shapefile.Reader(str(base))
     print(f"  reading {len(reader)} union polygons …")
@@ -292,6 +315,13 @@ async def main() -> None:
     )
     parser.add_argument("--skip-unions", action="store_true", help="Skip boundary import.")
     parser.add_argument(
+        "--unions-layer",
+        help=(
+            "Boundary shapefile stem inside Shapefiles/ "
+            f"(default: first of {', '.join(UNION_LAYERS)} that exists)."
+        ),
+    )
+    parser.add_argument(
         "--reset", action="store_true", help="Delete all CCM data before importing."
     )
     args = parser.parse_args()
@@ -313,7 +343,7 @@ async def main() -> None:
 
         if not args.skip_unions:
             print("Importing union boundaries …")
-            count = await import_unions(session, data_dir)
+            count = await import_unions(session, data_dir, args.unions_layer)
             print(f"  {count} unions loaded.\n")
 
         index = read_cyclone_list(data_dir)
