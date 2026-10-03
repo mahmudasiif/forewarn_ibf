@@ -25,6 +25,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+from shapely.geometry import MultiPolygon, Polygon
 
 from app.settings import settings
 
@@ -100,6 +101,25 @@ def _river_corridor() -> gpd.GeoDataFrame:
     return gpd.read_file(_db_dir() / "NRP_River_Corridor_2020.shp").to_crs(4326)
 
 
+def _outer_only(geom):
+    """Drop interior rings, keeping only the outer boundary of each part.
+
+    Dissolving unions that don't perfectly tile leaves hundreds of microscopic
+    sliver "holes" where neighbours fail to touch (median ~1e-12 deg^2). An
+    administrative upazila/district boundary has no legitimate donut-holes, so
+    every interior ring here is a dissolve artifact — drawn with ``fill: false``
+    they show up as random navy loops/segments *inside* the region. Rebuilding
+    from exterior rings only gives a clean outer boundary.
+    """
+    if geom is None or geom.is_empty:
+        return geom
+    if geom.geom_type == "Polygon":
+        return Polygon(geom.exterior)
+    if geom.geom_type == "MultiPolygon":
+        return MultiPolygon([Polygon(p.exterior) for p in geom.geoms])
+    return geom
+
+
 @lru_cache(maxsize=None)
 def _admin_outlines(layer: str) -> dict[str, gpd.GeoDataFrame]:
     """Upazila + district outlines dissolved from a layer's union geometry.
@@ -107,11 +127,14 @@ def _admin_outlines(layer: str) -> dict[str, gpd.GeoDataFrame]:
     Derived from the *same* polygons as the choropleth (per layer — the layer
     sets differ slightly, e.g. Risk has one fewer union), so the outlines trace
     the coloured units exactly with no stray edges or misaligned double lines.
+    Interior sliver holes from the dissolve are stripped (see ``_outer_only``).
     """
     base = _layer_gdf(layer)
     out: dict[str, gpd.GeoDataFrame] = {}
     for key, col in (("upazila", "Thana_ID"), ("district", "Dist_ID")):
-        out[key] = base[[col, "geometry"]].dissolve(by=col).reset_index()
+        dissolved = base[[col, "geometry"]].dissolve(by=col).reset_index()
+        dissolved["geometry"] = dissolved.geometry.apply(_outer_only)
+        out[key] = dissolved
     return out
 
 

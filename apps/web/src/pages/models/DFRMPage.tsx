@@ -4,8 +4,10 @@ import { FileText } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatusDot } from "@/components/shared/StatusDot";
 import { Card } from "@/components/shared/Card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ControlPanel, type SubmitMeta } from "@/features/models/dfrm/ControlPanel";
 import { DFRMMap } from "@/features/models/dfrm/DFRMMap";
+import { ForecastTab } from "@/features/models/dfrm/ForecastTab";
 import { RecentRuns } from "@/features/models/dfrm/RecentRuns";
 import { WarningCard } from "@/features/models/dfrm/WarningCard";
 import {
@@ -76,7 +78,15 @@ export default function DFRMPage() {
         }
       />
 
-      <div className="grid gap-6 p-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+      <div className="p-6">
+        <Tabs defaultValue="interactive">
+          <TabsList className="mb-4">
+            <TabsTrigger value="interactive">Interactive</TabsTrigger>
+            <TabsTrigger value="forecast">5-Day Forecast</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="interactive">
+            <div className="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
         <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
           {areas.data ? (
             <ControlPanel
@@ -144,6 +154,13 @@ export default function DFRMPage() {
             </Card>
           )}
         </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="forecast">
+            <ForecastTab />
+          </TabsContent>
+        </Tabs>
       </div>
     </>
   );

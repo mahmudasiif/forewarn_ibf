@@ -4,14 +4,24 @@ A stateless proxy in front of the DFRM model service. The portal picks an area
 and a water level; these endpoints return either a graded flood layer (GeoJSON,
 rendered as a Leaflet choropleth) or the per-area flood warning table.
 """
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
 
+from app.core import storage
 from app.core.deps import DbSession
+from app.core.exceptions import NotFoundError
 from app.modules.dfrm import service
-from app.modules.dfrm.schemas import Level, MapBody, RunSummary, WarningBody, WLKind
+from app.modules.dfrm.schemas import (
+    ForecastSetOut,
+    Level,
+    MapBody,
+    RunSummary,
+    WarningBody,
+    WLKind,
+)
 
 router = APIRouter(prefix="/dfrm", tags=["DFRM"])
 
@@ -79,3 +89,34 @@ async def export_warning_csv(
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ----------------------------------------------------- automated 5-day forecast
+
+
+@router.get("/forecast/latest", response_model=ForecastSetOut)
+async def forecast_latest(db: DbSession) -> ForecastSetOut:
+    """The most recent automated 5-day forecast set (FFWC-driven)."""
+    s = await service.latest_forecast(db)
+    if s is None:
+        raise NotFoundError("No DFRM forecast has been generated yet.")
+    return service.forecast_out(s)
+
+
+@router.get("/forecast/day/{day_id}/map")
+async def forecast_day_map(day_id: int, db: DbSession) -> StreamingResponse:
+    """Stream one forecast day's full /map response (GeoJSON) from storage."""
+    d = await service.forecast_day(db, day_id)
+    if d is None or not d.map_key:
+        raise NotFoundError(f"No map for forecast day {day_id}.")
+    body = storage.open_stream(d.map_key)
+    return StreamingResponse(body.iter_chunks(), media_type="application/json")
+
+
+@router.get("/forecast/{run_date}", response_model=ForecastSetOut)
+async def forecast_by_date(run_date: date, db: DbSession) -> ForecastSetOut:
+    """The automated forecast set for a specific run date."""
+    s = await service.forecast_for_date(db, run_date)
+    if s is None:
+        raise NotFoundError(f"No DFRM forecast for {run_date}.")
+    return service.forecast_out(s)

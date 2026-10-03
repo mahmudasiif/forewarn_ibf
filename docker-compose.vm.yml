@@ -78,9 +78,12 @@ services:
       context: ./services/worker
       dockerfile: Dockerfile
     env_file: [.env]
+    environment:
+      FFWC_CSV_DIR: /ffwc        # daily FFWC CSVs land here (also uploaded to MinIO)
     volumes:
       - ./data:/data:ro
       - prep-runs:/runs
+      - ./ffwc:/ffwc            # host-visible at /forewarn/ffwc/ffwc_YYYY-MM-DD.csv
     depends_on:
       db: {condition: service_healthy}
       redis: {condition: service_started}

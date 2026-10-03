@@ -1,7 +1,7 @@
 """DFRM request bodies — Module 7, Flood Risk. Map/warning responses are passed
 through from the model service (GeoJSON / warning tables) unchanged; the run
 history is the portal's own."""
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -50,3 +50,47 @@ class RunSummary(BaseModel):
     return_period: float | None = None
     summary: dict | None = None
     created_at: datetime
+
+
+# --------------------------------------------------------------- automated forecast
+
+
+class ForecastDayOut(BaseModel):
+    """One forecast day for one area, with a URL to stream its map GeoJSON."""
+
+    id: int
+    day_index: int
+    forecast_date: date
+    water_level: float
+    prev_water_level: float | None = None
+    limb: str
+    phase: str
+    area_id: str
+    area_name: str
+    river: str
+    station: str
+    hydrograph_day: str | None = None
+    return_period: float | None = None
+    feature_count: int | None = None
+    metric_unit: str | None = None
+    metric_min: float | None = None
+    metric_max: float | None = None
+    status: str
+    #: GET this to stream the day's full /map response (None if the run failed)
+    map_url: str | None = None
+
+
+class ForecastSetOut(BaseModel):
+    """One daily automated 5-day forecast set (FFWC-driven), with its day rows."""
+
+    id: int
+    run_date: date
+    source: str
+    station: str
+    danger_level: float
+    observed_wl: float | None = None
+    layer: str
+    level: str
+    pulled_at: datetime | None = None
+    created_at: datetime
+    days: list[ForecastDayOut]

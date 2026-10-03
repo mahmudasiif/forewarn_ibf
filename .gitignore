@@ -53,6 +53,8 @@ data/*
 *.tiff
 
 # --- docker / runtime ---
+# daily FFWC water-level CSVs (worker output; also in MinIO)
+ffwc/
 .docker-data/
 postgres-data/
 minio-data/
