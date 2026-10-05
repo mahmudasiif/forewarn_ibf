@@ -121,6 +121,45 @@ export type DfrmRun = {
   created_at: string;
 };
 
+/* ------------------------------------------------- automated 5-day forecast */
+
+export type ForecastDay = {
+  id: number;
+  day_index: number;
+  forecast_date: string;
+  water_level: number;
+  prev_water_level: number | null;
+  limb: string;
+  phase: string;
+  area_id: string;
+  area_name: string;
+  river: string;
+  station: string;
+  hydrograph_day: string | null;
+  return_period: number | null;
+  feature_count: number | null;
+  metric_unit: string | null;
+  metric_min: number | null;
+  metric_max: number | null;
+  status: string;
+  /** path (relative to the API base) to stream this day's map GeoJSON */
+  map_url: string | null;
+};
+
+export type ForecastSet = {
+  id: number;
+  run_date: string;
+  source: string;
+  station: string;
+  danger_level: number;
+  observed_wl: number | null;
+  layer: MapLayer;
+  level: DFRMLevel;
+  pulled_at: string | null;
+  created_at: string;
+  days: ForecastDay[];
+};
+
 /* ----------------------------------------------------------------- hooks */
 
 export function useAreas() {
@@ -153,6 +192,27 @@ export function useDfrmRuns(limit = 20) {
     queryKey: ["dfrm", "runs", limit],
     queryFn: async () => (await api.get<DfrmRun[]>("/dfrm/runs", { params: { limit } })).data,
     staleTime: 10_000,
+  });
+}
+
+/** The latest automated 5-day forecast set (404 until the first run lands). */
+export function useDfrmForecastLatest() {
+  return useQuery({
+    queryKey: ["dfrm", "forecast", "latest"],
+    queryFn: async () => (await api.get<ForecastSet>("/dfrm/forecast/latest")).data,
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+/** Stream one forecast day's full map GeoJSON (same shape as an interactive map). */
+export function useForecastDayMap(dayId: number | null) {
+  return useQuery({
+    queryKey: ["dfrm", "forecast", "day", dayId, "map"],
+    queryFn: async () =>
+      (await api.get<MapResponse>(`/dfrm/forecast/day/${dayId}/map`)).data,
+    enabled: dayId != null,
+    staleTime: Infinity,
   });
 }
 

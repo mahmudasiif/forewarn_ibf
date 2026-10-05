@@ -18,6 +18,8 @@ celery_app = Celery(
         "app.jobs.model_runs",
         "app.jobs.alerts",
         "app.jobs.preparedness",
+        "app.jobs.ffwc",
+        "app.jobs.dfrm_forecast",
     ],
 )
 
@@ -30,6 +32,13 @@ celery_app.conf.update(
 
 # Scheduled work — times are Asia/Dhaka.
 celery_app.conf.beat_schedule = {
+    # FFWC publishes the morning forecast and keeps updating into the afternoon
+    # (last-update stamps seen ~3 PM), so pull once daily at 17:00 Dhaka to catch
+    # the settled figures. Bump to a shorter interval if fresher data is needed.
+    "pull-ffwc-waterlevels": {
+        "task": "app.jobs.ffwc.pull_ffwc",
+        "schedule": crontab(minute=0, hour=17),
+    },
     # "ingest-hazard-forecasts": {
     #     "task": "app.jobs.ingestion.ingest_forecasts",
     #     "schedule": crontab(minute=0, hour="*/6"),

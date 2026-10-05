@@ -7,12 +7,15 @@ persists nothing).
 """
 import csv
 import io
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.integrations.dfrm_client import dfrm_client
-from app.modules.dfrm.models import DfrmRun
+from app.modules.dfrm.models import DfrmForecastDay, DfrmForecastSet, DfrmRun
+from app.modules.dfrm.schemas import ForecastDayOut, ForecastSetOut
 
 # Column order for the warning CSV, by admin level (mirrors the desktop tool).
 _BASE_COLS = ["Risk Level", "Water Depth", "Flood Duration", "Water Speed", "Damage"]
@@ -129,3 +132,77 @@ def warning_csv(result: dict) -> str:
         dict_writer.writerow(row)
 
     return buffer.getvalue()
+
+
+# ------------------------------------------------------ automated forecast reads
+
+
+def _day_out(d: DfrmForecastDay) -> ForecastDayOut:
+    return ForecastDayOut(
+        id=d.id,
+        day_index=d.day_index,
+        forecast_date=d.forecast_date,
+        water_level=d.water_level,
+        prev_water_level=d.prev_water_level,
+        limb=d.limb,
+        phase=d.phase,
+        area_id=d.area_id,
+        area_name=d.area_name,
+        river=d.river,
+        station=d.station,
+        hydrograph_day=d.hydrograph_day,
+        return_period=d.return_period,
+        feature_count=d.feature_count,
+        metric_unit=d.metric_unit,
+        metric_min=d.metric_min,
+        metric_max=d.metric_max,
+        status=d.status,
+        map_url=(
+            f"/dfrm/forecast/day/{d.id}/map"
+            if d.map_key and d.status == "ok"
+            else None
+        ),
+    )
+
+
+def forecast_out(s: DfrmForecastSet) -> ForecastSetOut:
+    """Build the API response from a loaded set (days must be eager-loaded)."""
+    days = [_day_out(d) for d in sorted(s.days, key=lambda x: (x.day_index, x.area_id))]
+    return ForecastSetOut(
+        id=s.id,
+        run_date=s.run_date,
+        source=s.source,
+        station=s.station,
+        danger_level=s.danger_level,
+        observed_wl=s.observed_wl,
+        layer=s.layer,
+        level=s.level,
+        pulled_at=s.pulled_at,
+        created_at=s.created_at,
+        days=days,
+    )
+
+
+async def latest_forecast(db: AsyncSession) -> DfrmForecastSet | None:
+    q = (
+        select(DfrmForecastSet)
+        .options(selectinload(DfrmForecastSet.days))
+        .order_by(DfrmForecastSet.run_date.desc())
+        .limit(1)
+    )
+    return (await db.execute(q)).scalars().first()
+
+
+async def forecast_for_date(db: AsyncSession, run_date: date) -> DfrmForecastSet | None:
+    q = (
+        select(DfrmForecastSet)
+        .options(selectinload(DfrmForecastSet.days))
+        .where(DfrmForecastSet.run_date == run_date)
+    )
+    return (await db.execute(q)).scalars().first()
+
+
+async def forecast_day(db: AsyncSession, day_id: int) -> DfrmForecastDay | None:
+    return (
+        await db.execute(select(DfrmForecastDay).where(DfrmForecastDay.id == day_id))
+    ).scalars().first()

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { GeoJSON, MapContainer, Pane, TileLayer, useMap } from "react-leaflet";
+import { GeoJSON, LayersControl, MapContainer, TileLayer, useMap } from "react-leaflet";
 import type { Feature, Geometry } from "geojson";
 import L, { type Path, type PathOptions } from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -14,12 +14,36 @@ const CENTER: [number, number] = [25.0, 89.7];
 const ZOOM = 9;
 const MAX_ZOOM = 16;
 
-const ESRI_BASE =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}";
-const ESRI_LABELS =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
-const ESRI_ATTRIBUTION =
-  'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Esri, DeLorme, NAVTEQ';
+/** Selectable basemaps — same set Forecast-X offers (plain Leaflet). */
+const BASEMAPS = [
+  {
+    name: "OpenStreetMap",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
+  },
+  {
+    name: "Light (CARTO)",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    maxZoom: 19,
+    subdomains: "abcd",
+  },
+  {
+    name: "Satellite (Esri)",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, GIS User Community",
+    maxZoom: 19,
+  },
+  {
+    name: "Topographic",
+    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    attribution:
+      'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, SRTM | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)',
+    maxZoom: 17,
+  },
+] as const;
 
 function featureName(p: Record<string, unknown>): string {
   return String(p.UNINAME ?? p.THANAME ?? p.DISTNAME ?? "");
@@ -107,7 +131,19 @@ export function DFRMMap({ data, loading }: { data: MapResponse | undefined; load
         className="h-full w-full rounded-b-card"
         style={{ background: "#EFF4F7" }}
       >
-        <TileLayer url={ESRI_BASE} attribution={ESRI_ATTRIBUTION} maxZoom={MAX_ZOOM} crossOrigin="anonymous" />
+        <LayersControl position="bottomright">
+          {BASEMAPS.map((base, i) => (
+            <LayersControl.BaseLayer key={base.name} name={base.name} checked={i === 0}>
+              <TileLayer
+                url={base.url}
+                attribution={base.attribution}
+                maxZoom={base.maxZoom}
+                subdomains={"subdomains" in base ? base.subdomains : "abc"}
+                crossOrigin="anonymous"
+              />
+            </LayersControl.BaseLayer>
+          ))}
+        </LayersControl>
 
         {/* River corridor (soft) then active channel (blue), under the choropleth. */}
         {data && data.rivers.corridor.features.length > 0 && (
@@ -154,10 +190,6 @@ export function DFRMMap({ data, loading }: { data: MapResponse | undefined; load
             interactive={false}
           />
         )}
-
-        <Pane name="labels" style={{ zIndex: 450, pointerEvents: "none" }}>
-          <TileLayer url={ESRI_LABELS} maxZoom={MAX_ZOOM} crossOrigin="anonymous" />
-        </Pane>
 
         <FitToData data={data} />
       </MapContainer>
