@@ -79,6 +79,8 @@ services:
     volumes:
       - ./services/ccm:/app
       - ./services/ccm/weights:/app/weights:ro
+      # The model joins every run against these boundaries and lookup tables.
+      - ./data:/data:ro
 
   preparedness:
     build:

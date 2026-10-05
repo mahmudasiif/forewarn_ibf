@@ -1,8 +1,11 @@
 # ---------- dev ----------
 FROM node:22-alpine AS dev
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+# The lockfile is copied and npm ci used so every image gets the exact same
+# dependency tree — a bare `npm install` re-resolves versions at build time
+# and once produced a corrupted typescript install that broke `npm run build`.
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
 EXPOSE 5173
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
@@ -19,8 +22,8 @@ ARG VITE_CCM_DASHBOARD_URL=/ccm/
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_CCM_DASHBOARD_URL=$VITE_CCM_DASHBOARD_URL
 
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
 RUN npm run build
 

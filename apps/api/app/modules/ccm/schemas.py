@@ -112,3 +112,28 @@ class BoundaryResponse(BaseModel):
     features: list[dict[str, Any]]
     level: str
     feature_count: int = 0
+
+
+class RunSummary(BaseModel):
+    """One model execution, as the run list and the status poll return it."""
+
+    id: int
+    cyclone_code: str
+    #: "queued" | "running" | "succeeded" | "failed"
+    status: str
+    cyclone_id: int | None = None
+    cyclone_name: str | None = None
+    row_count: int | None = None
+    #: Present only on a failed run — the model's own message, verbatim.
+    error: str | None = None
+    took_ms: int | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
+
+
+class RunAccepted(BaseModel):
+    """The answer to starting a run: the work has begun, poll this id."""
+
+    id: int
+    cyclone_code: str
+    status: str = "queued"

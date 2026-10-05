@@ -7,7 +7,9 @@ graphify-out/
 Cyclone-AI-Guideline-Handover/
 DFRM/
 GIS Layers/
+GIS_Layers/
 CCM/
+CCM_v2.9.3/
 
 # stray root lockfile (there is no root package.json — the app lives in apps/web)
 /package-lock.json

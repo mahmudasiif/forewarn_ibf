@@ -1,9 +1,10 @@
 """CCM ORM models. Tables live in the `ccm` Postgres schema.
 
-Three tables:
+Four tables:
   unions   — the 1,585 union boundaries the model reports against (geometry)
   cyclones — one row per cyclone whose results have been loaded
   results  — one row per union per cyclone, holding the model's output metrics
+  runs     — one row per model execution started from the portal
 """
 from datetime import date, datetime
 
@@ -21,6 +22,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -71,6 +73,11 @@ class Cyclone(Base):
     source: Mapped[str] = mapped_column(String(30), default="package")
     model_version: Mapped[str] = mapped_column(String(30), default="v2.9.3")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The cyclone's track as a GeoJSON FeatureCollection. The CCM package
+    #: ships one shapefile per cyclone and the desktop tool drew it over the
+    #: map; storing it here lets the portal do the same without shipping
+    #: shapefiles to the browser.
+    track_geojson: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     imported_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -131,3 +138,41 @@ class CCMResult(Base):
     risk_pct: Mapped[float | None] = mapped_column(Float)
 
     cyclone: Mapped["Cyclone"] = relationship(back_populates="results")
+
+
+class CCMRun(Base):
+    """One execution of the model, started by an operator through the portal.
+
+    A run takes minutes, so it is recorded before the work starts and updated
+    as it progresses — the browser polls this row rather than holding a
+    request open, and a closed tab or a page refresh does not lose the run.
+    """
+
+    __tablename__ = "runs"
+    __table_args__ = (
+        Index("ix_ccm_runs_status", "status"),
+        Index("ix_ccm_runs_created_at", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: The code the results are stored under, e.g. "MD19072026_Actual".
+    cyclone_code: Mapped[str] = mapped_column(String(120), index=True)
+    #: "queued" | "running" | "succeeded" | "failed"
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    #: Populated once the results land, so the UI can link straight to them.
+    cyclone_id: Mapped[int | None] = mapped_column(
+        ForeignKey(f"{SCHEMA}.cyclones.id", ondelete="SET NULL"), nullable=True
+    )
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Which files were uploaded, and the metadata entered with them — kept so
+    #: a run can be explained (or re-run) later without the originals.
+    inputs: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    #: Why a failed run failed, verbatim, for the operator to act on.
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    took_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
