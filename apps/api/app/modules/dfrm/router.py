@@ -36,8 +36,10 @@ async def get_areas() -> dict:
 async def post_map(body: MapBody, db: DbSession) -> dict:
     """A graded flood layer for the selected area, as a GeoJSON choropleth."""
     request = body.model_dump()
+    do_record = request.pop("record", True)
     result = await service.map_layer(request)
-    await service.record_run(db, kind="map", request=request, result=result)
+    if do_record:
+        await service.record_run(db, kind="map", request=request, result=result)
     return result
 
 

@@ -148,6 +148,7 @@ def _day_out(d: DfrmForecastDay) -> ForecastDayOut:
         phase=d.phase,
         area_id=d.area_id,
         area_name=d.area_name,
+        layer=d.layer,
         river=d.river,
         station=d.station,
         hydrograph_day=d.hydrograph_day,
@@ -167,7 +168,10 @@ def _day_out(d: DfrmForecastDay) -> ForecastDayOut:
 
 def forecast_out(s: DfrmForecastSet) -> ForecastSetOut:
     """Build the API response from a loaded set (days must be eager-loaded)."""
-    days = [_day_out(d) for d in sorted(s.days, key=lambda x: (x.day_index, x.area_id))]
+    days = [
+        _day_out(d)
+        for d in sorted(s.days, key=lambda x: (x.day_index, x.area_id, x.layer))
+    ]
     return ForecastSetOut(
         id=s.id,
         run_date=s.run_date,

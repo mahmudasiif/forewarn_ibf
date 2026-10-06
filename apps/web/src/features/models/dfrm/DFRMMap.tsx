@@ -3,7 +3,7 @@ import { GeoJSON, LayersControl, MapContainer, TileLayer, useMap } from "react-l
 import type { Feature, Geometry } from "geojson";
 import L, { type Path, type PathOptions } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { Download, Image as ImageIcon } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Image as ImageIcon } from "lucide-react";
 
 import { buildBuckets, colorFor, formatValue, NO_DATA_COLOR } from "@/features/models/ccm/colorScale";
 import { downloadBlob, downloadGeoJSON, mapFileStem } from "./export";
@@ -50,17 +50,38 @@ function featureName(p: Record<string, unknown>): string {
 }
 
 /** Reframe on whatever is currently shown. */
-function FitToData({ data }: { data: MapResponse | undefined }) {
+function FitAndResize({ data }: { data: MapResponse | undefined }) {
   const map = useMap();
-  const signature = `${data?.area_id}-${data?.layer}-${data?.day}`;
+  // feature_count is in the signature so a merged multi-district view re-fits
+  // once the second district's features arrive (otherwise part is cut off).
+  const signature = `${data?.area_id}-${data?.layer}-${data?.day}-${data?.feature_count}`;
   useEffect(() => {
-    if (!data || data.features.length === 0) return;
-    try {
-      const bounds = L.geoJSON(data as never).getBounds();
-      if (bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
-    } catch {
-      /* a malformed geometry should never take the map down */
-    }
+    const fit = () => {
+      map.invalidateSize();
+      if (!data || data.features.length === 0) return;
+      try {
+        const bounds = L.geoJSON(data as never).getBounds();
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24], maxZoom: 12 });
+      } catch {
+        /* a malformed geometry should never take the map down */
+      }
+    };
+    // Fit now (once layout settles), and again whenever the container resizes
+    // — window resize, sidebar toggle, tab switch. invalidateSize first so
+    // Leaflet re-reads the new box, then re-centre the polygons with padding.
+    const t = window.setTimeout(fit, 0);
+    const container = map.getContainer();
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      window.cancelAnimationFrame(raf);
+      raf = window.requestAnimationFrame(fit);
+    });
+    ro.observe(container);
+    return () => {
+      window.clearTimeout(t);
+      window.cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature, map]);
   return null;
@@ -191,7 +212,7 @@ export function DFRMMap({ data, loading }: { data: MapResponse | undefined; load
           />
         )}
 
-        <FitToData data={data} />
+        <FitAndResize data={data} />
       </MapContainer>
 
       {data && data.features.length > 0 && <MapLegend data={data} buckets={buckets} />}
@@ -240,29 +261,48 @@ function MapLegend({
   data: MapResponse;
   buckets: ReturnType<typeof buildBuckets>;
 }) {
+  const [open, setOpen] = useState(true);
   return (
-    <div className="absolute bottom-4 left-4 z-[500] rounded-card border border-navy-200 bg-white/95 px-3 py-2.5 backdrop-blur">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {data.layer}
-        {data.metric_unit ? ` (${data.metric_unit})` : ""}
-      </p>
-      <ul className="mt-2 space-y-1">
-        {buckets.map((bucket) => (
-          <li key={bucket.from} className="flex items-center gap-2">
-            <span className="size-3 shrink-0 rounded-sm" style={{ background: bucket.color }} />
-            <span className="text-[11px] tabular-nums text-navy-700">
-              {formatValue(bucket.from)} – {formatValue(bucket.to)}
-            </span>
-          </li>
-        ))}
-        <li className="flex items-center gap-2 border-t border-navy-200 pt-1">
-          <span className="size-3 shrink-0 rounded-sm" style={{ background: NO_DATA_COLOR }} />
-          <span className="text-[11px] text-muted-foreground">No data</span>
-        </li>
-      </ul>
-      <p className="mt-2 border-t border-navy-200 pt-1.5 text-[10px] text-muted-foreground">
-        {data.feature_count.toLocaleString()} areas · hydrograph {data.day}
-      </p>
+    // Top-right, below the export buttons — away from the centred polygons and
+    // clear of the bottom-right layers control + attribution. Compact + collapsible.
+    <div className="absolute right-3 top-16 z-[500] w-36 overflow-hidden rounded-md border border-navy-200 bg-white/95 shadow-sm backdrop-blur">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title={open ? "Collapse legend" : "Expand legend"}
+        className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5"
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {data.layer}
+          {data.metric_unit ? ` (${data.metric_unit})` : ""}
+        </span>
+        {open ? (
+          <ChevronUp className="size-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        )}
+      </button>
+      {open && (
+        <div className="px-2.5 pb-2">
+          <ul className="space-y-0.5">
+            {buckets.map((bucket) => (
+              <li key={bucket.from} className="flex items-center gap-1.5">
+                <span className="size-2.5 shrink-0 rounded-sm" style={{ background: bucket.color }} />
+                <span className="text-[10px] tabular-nums text-navy-700">
+                  {formatValue(bucket.from)} – {formatValue(bucket.to)}
+                </span>
+              </li>
+            ))}
+            <li className="flex items-center gap-1.5 border-t border-navy-200 pt-0.5">
+              <span className="size-2.5 shrink-0 rounded-sm" style={{ background: NO_DATA_COLOR }} />
+              <span className="text-[10px] text-muted-foreground">No data</span>
+            </li>
+          </ul>
+          <p className="mt-1.5 border-t border-navy-200 pt-1 text-[9px] text-muted-foreground">
+            {data.feature_count.toLocaleString()} areas · {data.day}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

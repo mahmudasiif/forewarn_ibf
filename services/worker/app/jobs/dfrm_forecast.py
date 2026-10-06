@@ -34,8 +34,15 @@ WARNING_MARGIN_M = 0.5
 
 #: Internal DFRM model service (same network as the API's DFRM client).
 DFRM_URL = os.getenv("DFRM_SERVICE_URL", "http://dfrm:8000")
-#: Layer shown in the 5-day forecast. Inundation = flood extent (the natural view).
-FORECAST_LAYER = os.getenv("DFRM_FORECAST_LAYER", "Inundation")
+#: Map layers generated per day. Inundation (flood extent) is the default view;
+#: the 5-day tab lets the user switch between all of them.
+FORECAST_LAYERS = [
+    x.strip()
+    for x in os.getenv(
+        "DFRM_FORECAST_LAYERS", "Inundation,Hazard,Risk,Vulnerability"
+    ).split(",")
+    if x.strip()
+]
 #: Areas the auto-run covers. District level is entirely Jamuna-driven (Bahadurabad),
 #: so both districts are correctly driven by the single Bahadurabad feed.
 FORECAST_LEVEL = "District"
@@ -51,11 +58,12 @@ def phase_for(wl: float, danger: float) -> str:
 
 
 def classify_forecast(record: dict) -> list[dict]:
-    """Current-state 5-day classification for one FFWC station record.
+    """Current-state classification: Today (latest observed) + each forecast day.
 
     ``record`` is a parse_forecast() row: {river, station, danger_level,
     readings: [{date, time, type(observed|forecast), wl}]}.
-    Returns one entry per forecast day, in chronological order.
+    Returns entries in chronological order: day_index 0 = Today (most recent
+    observed level), then day_index 1..N for the FFWC forecast days.
     """
     danger = float(record["danger_level"])
     observed = sorted(
@@ -66,12 +74,32 @@ def classify_forecast(record: dict) -> list[dict]:
         (r for r in record["readings"] if r["type"] == "forecast"),
         key=lambda r: r["date"],
     )
-    # Anchor day 1 on the most recent observed level (fall back to first forecast).
+
+    days: list[dict] = []
+
+    # day 0 = Today: the most recent observed level; limb vs the prior observed.
+    if observed:
+        today = observed[-1]
+        today_wl = float(today["wl"])
+        prev_obs = float(observed[-2]["wl"]) if len(observed) >= 2 else None
+        today_limb = (
+            "Flood Increasing" if prev_obs is None or today_wl >= prev_obs else "Flood Decreasing"
+        )
+        days.append(
+            {
+                "day_index": 0,
+                "date": today["date"],
+                "water_level": today_wl,
+                "prev_water_level": prev_obs,
+                "limb": today_limb,
+                "phase": phase_for(today_wl, danger),
+            }
+        )
+
+    # Forecast days: anchor day 1 on the most recent observed level.
     prev = float(observed[-1]["wl"]) if observed else (
         float(forecast[0]["wl"]) if forecast else None
     )
-
-    days: list[dict] = []
     for i, r in enumerate(forecast, start=1):
         wl = float(r["wl"])
         if prev is None or wl >= prev:
@@ -113,11 +141,13 @@ def _upload_json(obj: dict, key: str) -> str:
     return key
 
 
-def build_day_area_row(day: dict, area_id: str, area_name: str, run_date: date) -> dict:
-    """Call DFRM /map for one day+area, upload the map JSON, return a DB row dict.
+def build_day_area_layer_row(
+    day: dict, area_id: str, area_name: str, layer: str, run_date: date
+) -> dict:
+    """Call DFRM /map for one day+area+layer, upload the map JSON, return a row dict.
 
     Defensive: a failed call yields a row with status='error' rather than raising,
-    so one bad day/area never sinks the whole set.
+    so one bad day/area/layer never sinks the whole set.
     """
     row = {
         "day_index": day["day_index"],
@@ -128,6 +158,7 @@ def build_day_area_row(day: dict, area_id: str, area_name: str, run_date: date) 
         "phase": day["phase"],
         "area_id": area_id,
         "area_name": area_name,
+        "layer": layer,
         "river": "Jamuna",  # District level always routes to Jamuna/Bahadurabad
         "station": "Bahadurabad (Jamuna)",
         "hydrograph_day": None,
@@ -143,14 +174,17 @@ def build_day_area_row(day: dict, area_id: str, area_name: str, run_date: date) 
     body = {
         "level": FORECAST_LEVEL,
         "area_id": area_id,
-        "layer": FORECAST_LAYER,
+        "layer": layer,
         "water_level": day["water_level"],
         "wl_kind": "WL",
         "limb": day["limb"],
     }
     try:
         resp = _dfrm_post("/map", body)
-        key = f"dfrm/forecast/{run_date.isoformat()}/day{day['day_index']}_{area_id}.json"
+        key = (
+            f"dfrm/forecast/{run_date.isoformat()}/"
+            f"day{day['day_index']}_{area_id}_{layer}.json"
+        )
         _upload_json(resp, key)
         row.update(
             station=resp.get("station") or row["station"],
@@ -162,8 +196,11 @@ def build_day_area_row(day: dict, area_id: str, area_name: str, run_date: date) 
             metric_max=resp.get("metric_max"),
             map_key=key,
         )
-    except Exception as exc:  # noqa: BLE001 - one area failing must not stop the rest
-        log.warning("DFRM /map failed day=%s area=%s: %s", day["date"], area_id, exc)
+    except Exception as exc:  # noqa: BLE001 - one call failing must not stop the rest
+        log.warning(
+            "DFRM /map failed day=%s area=%s layer=%s: %s",
+            day["date"], area_id, layer, exc,
+        )
         row.update(status="error", error=str(exc))
     return row
 
@@ -200,11 +237,11 @@ def persist_set(set_meta: dict, rows: list[dict]) -> int:
                         """
                         INSERT INTO dfrm.forecast_days
                           (set_id, day_index, forecast_date, water_level, prev_water_level, limb, phase,
-                           area_id, area_name, river, station, hydrograph_day, return_period, feature_count,
+                           area_id, area_name, layer, river, station, hydrograph_day, return_period, feature_count,
                            metric_unit, metric_min, metric_max, map_key, status, error)
                         VALUES
                           (:set_id, :day_index, :forecast_date, :water_level, :prev_water_level, :limb, :phase,
-                           :area_id, :area_name, :river, :station, :hydrograph_day, :return_period, :feature_count,
+                           :area_id, :area_name, :layer, :river, :station, :hydrograph_day, :return_period, :feature_count,
                            :metric_unit, :metric_min, :metric_max, :map_key, :status, :error)
                         """
                     ),
@@ -245,11 +282,12 @@ def run_dfrm_forecast(record: dict | None = None) -> dict:
     )
     observed_wl = float(observed[-1]["wl"]) if observed else None
 
-    # Stage 2+3: run DFRM /map per day x area, upload the map JSON, collect DB rows.
+    # Run DFRM /map per day x area x layer, upload each map JSON, collect DB rows.
     rows: list[dict] = []
     for d in days:
         for area_id, area_name in TARGET_AREAS:
-            rows.append(build_day_area_row(d, area_id, area_name, run_date))
+            for layer in FORECAST_LAYERS:
+                rows.append(build_day_area_layer_row(d, area_id, area_name, layer, run_date))
 
     set_meta = {
         "run_date": run_date,
@@ -257,21 +295,21 @@ def run_dfrm_forecast(record: dict | None = None) -> dict:
         "station": record["station"],
         "danger_level": float(record["danger_level"]),
         "observed_wl": observed_wl,
-        "layer": FORECAST_LAYER,
+        "layer": FORECAST_LAYERS[0],  # default layer the UI opens on
         "level": FORECAST_LEVEL,
         "pulled_at": now,
     }
     set_id = persist_set(set_meta, rows)
     ok = sum(1 for r in rows if r["status"] == "ok")
     log.info(
-        "DFRM forecast persisted — set=%s run_date=%s days=%s rows=%s ok=%s",
-        set_id, run_date, len(days), len(rows), ok,
+        "DFRM forecast persisted — set=%s run_date=%s days=%s layers=%s rows=%s ok=%s",
+        set_id, run_date, len(days), len(FORECAST_LAYERS), len(rows), ok,
     )
     return {
         "status": "ok",
         "set_id": set_id,
         "run_date": run_date.isoformat(),
-        "layer": FORECAST_LAYER,
+        "layers": FORECAST_LAYERS,
         "level": FORECAST_LEVEL,
         "days": len(days),
         "rows": len(rows),
