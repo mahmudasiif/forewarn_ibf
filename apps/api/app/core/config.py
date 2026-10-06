@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     CCM_SERVICE_URL: str = "http://ccm:8000"
     MODEL_REQUEST_TIMEOUT: int = 120
 
+    # One CCM run joins millions of simulation grid points against 1,585 union
+    # polygons — minutes, not seconds. The run happens in a background task, so
+    # this timeout bounds the model call, not anyone's HTTP request.
+    CCM_RUN_TIMEOUT: int = 1800
+
     # preparedness guidance model (Module 3) — runs are long (GIS + maps + LLM),
     # so it gets its own generous timeout separate from the default.
     PREPAREDNESS_SERVICE_URL: str = "http://preparedness:8000"

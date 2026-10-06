@@ -248,6 +248,16 @@ async def map_features(
     so neighbours keep matching borders. It is a window function, hence the
     OVER () — the window is the set of rows this query returns, which is
     exactly the coverage being drawn.
+
+    The third argument, simplifyBoundary, is false: only the *interior* edges
+    between neighbouring unions are simplified, and the outer edge of the
+    coverage is left at full precision. That outer edge is the coastline, the
+    estuary mouths and the char islands — the parts an operator reads the map
+    by. Simplifying those too saves little (they are a small share of the
+    vertices) and costs a lot: the coast straightens, small islands collapse,
+    and the drawn area no longer matches the area the numbers are for. It also
+    means the outline stays put as you change the simplify tolerance; only the
+    internal borders coarsen.
     """
     cyclone = await get_cyclone(db, code)
     chosen = metric_registry.resolve(metric)
@@ -265,7 +275,7 @@ async def map_features(
         params["threshold"] = threshold
 
     geom_sql = (
-        "ST_CoverageSimplify(u.geom, :simplify) OVER ()"
+        "ST_CoverageSimplify(u.geom, :simplify, false) OVER ()"
         if params["simplify"] > 0
         else "u.geom"
     )
@@ -366,9 +376,14 @@ async def boundaries(
     where = _filters(params)
 
     # Simplify the dissolved coverage, not each outline on its own, so two
-    # neighbouring districts keep the single shared line between them.
+    # neighbouring districts keep the single shared line between them — and
+    # with simplifyBoundary false, so the coastal edge of the outermost
+    # districts still traces the real coast. These lines are drawn directly
+    # over the union fill, so if the two were simplified differently the
+    # district outline would visibly cut across or float off the polygons
+    # underneath it.
     geom_sql = (
-        "ST_CoverageSimplify(geom, :simplify) OVER ()"
+        "ST_CoverageSimplify(geom, :simplify, false) OVER ()"
         if params["simplify"] > 0
         else "geom"
     )

@@ -1,21 +1,26 @@
-"""The contract this service exposes. Replace the placeholders with the real shapes."""
+"""The contract this service exposes.
+
+The CCM is not an inference model — it is a deterministic geospatial
+calculation over one cyclone's simulation output. A "prediction" here is a
+*run*: raw storm-surge/wind/rain grids in, one row per coastal union out.
+"""
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class PredictRequest(BaseModel):
-    """TODO: describe the real inputs this model needs."""
-
-    inputs: dict[str, Any] = Field(default_factory=dict)
-
-
-class PredictResponse(BaseModel):
-    """TODO: describe the real outputs this model produces."""
+class RunResponse(BaseModel):
+    """One completed CCM run."""
 
     model_name: str
     model_version: str
-    outputs: dict[str, Any] = Field(default_factory=dict)
+    cyclone_code: str
+    #: One dict per union, keyed by the CCM result column names
+    #: (same headers the desktop tool writes to Cyclone_Info/<name>.csv).
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+    #: The cyclone track as GeoJSON, for drawing on the portal map.
+    track: dict[str, Any] | None = None
+    row_count: int = 0
     took_ms: int | None = None
 
 
@@ -23,12 +28,11 @@ class InfoResponse(BaseModel):
     name: str
     version: str
     ready: bool
-    input_schema: dict[str, Any]
-    output_schema: dict[str, Any]
+    #: Which raw files a run needs, and which columns it returns.
+    required_files: list[str]
+    optional_files: list[str]
+    result_columns: list[str]
 
 
-class JobResponse(BaseModel):
-    job_id: str
-    status: str
-    result: dict[str, Any] | None = None
-    error: str | None = None
+class ErrorResponse(BaseModel):
+    detail: str

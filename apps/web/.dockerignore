@@ -1,0 +1,8 @@
+# The Windows-side node_modules must never enter the image: COPY . . would
+# clobber the Linux tree that `npm ci` just installed, and its flattened .bin
+# shims break every bare command in package.json scripts (tsc, eslint...).
+node_modules
+dist
+.vite
+*.tsbuildinfo
+.eslintcache

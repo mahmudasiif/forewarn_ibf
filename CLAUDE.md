@@ -117,3 +117,60 @@ reproduced here to save tokens — ask the user if the detail is needed.
 6. Before deploying this repo anywhere: confirm with the user whether it still
    targets the same model VM (`10.71.1.102`) and whether the old `ibf-portal`
    deployment there should be torn down or coexist.
+## CCM: the real model now runs inside the portal (2026-10-02)
+
+Until now the portal only *served* CCM results: `scripts/import_ccm.py` loaded
+the CSVs shipped with the CCM package, and producing a new cyclone meant
+running the desktop tool by hand and re-importing. The real model now runs
+here.
+
+**What was ported.** `CCM 2.9 (with Rain) - For Share` (BUET, Md. Manjurul
+Husain Shourov) turned out to be plain Python — PyQt only for the window,
+`CCM_Update_Database.py` for the actual calculation, no GUI dependency in any
+of the maths. That calculation is ported verbatim into
+`services/ccm/app/model/engine.py`. No Wine, no VNC, no GUI automation.
+
+**Where each piece lives**
+
+| Piece | Path |
+|---|---|
+| The calculation | `services/ccm/app/model/engine.py` |
+| Model service (`POST /runs`, multipart) | `services/ccm/app/main.py` |
+| Reference data loaded once at startup | `services/ccm/app/model/loader.py` |
+| Orchestration + status | `apps/api/app/modules/ccm/runs.py` |
+| Writing results to Postgres | `apps/api/app/modules/ccm/ingest.py` |
+| Endpoints (`POST/GET /ccm/runs`) | `apps/api/app/modules/ccm/router.py` |
+| Upload UI | `apps/web/src/features/models/ccm/RunNewCycloneTab.tsx` |
+
+**Flow.** Operator uploads one cyclone's simulation output → API records a
+`ccm.runs` row and returns immediately → background task POSTs the files to
+the `ccm` service → engine computes one row per union (minutes) → rows replace
+that cyclone's `ccm.results` → every existing endpoint (map, table, CSV)
+serves them unchanged. The browser polls `GET /ccm/runs/{id}`.
+
+**The model does not simulate the storm.** It post-processes simulation output
+produced upstream (water depth / wind speed / velocity grids, rainfall, track)
+— at present by Anis Sir at BUET. A run needs those files; the portal cannot
+generate them.
+
+**Two boundary layers, do not mix them.** The engine joins against the model's
+own `CCM_Unions_wgs84` / `CCM_Unions_without_River_wgs84`, because
+`Base_info/*.xlsx` are keyed to the original `Union_Geo` codes.
+`CCM_Unions_BBS21` is display-only (the river-gap fix) and must never be
+substituted inside the engine.
+
+**Verified so far:** `RESULT_COLUMNS` matches the real tool's own CSV header
+exactly (21 columns, same order, checked against `REMAL_Actual.csv`), and
+matches `COLUMN_MAP` in both `ingest.py` and `scripts/import_ccm.py`.
+**Not yet verified:** no end-to-end run — there is no sample raw-input folder
+anywhere in the repo. The numbers this produces have never been compared
+against the desktop tool's for the same input. Get one real scenario folder
+from BUET and compare before anyone trusts a portal-run result.
+
+**Also changed:** the CCM map is now plain Leaflet + OpenStreetMap, one tile
+layer. The Esri grey canvas and its separate labels overlay are gone.
+`ccm.cyclones.track_geojson` (migration `0005_ccm_runs`) stores the cyclone
+track so the map can draw it; nothing renders it yet.
+
+**Cleanup left:** `services/ccm/_to_delete/` holds the old stub
+`preprocess.py` / `postprocess.py` — delete the folder.

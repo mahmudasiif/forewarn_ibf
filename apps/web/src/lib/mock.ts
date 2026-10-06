@@ -178,23 +178,6 @@ export const MODEL_RUNS: ModelRun[] = [
   { id: "run-2408", model: "CCM v2.9.3", trigger: "scheduled", status: "failed", startedAt: "08 Sep 2026, 11:40", duration: "0m 22s", triggeredBy: "Scheduler" },
 ];
 
-export type CrisisEvent = {
-  id: string;
-  title: string;
-  hazard: string;
-  location: string;
-  reportedAt: string;
-  status: "pending" | "validated" | "rejected";
-  source: string;
-};
-
-export const CRISIS_EVENTS: CrisisEvent[] = [
-  { id: "cr-88", title: "Embankment breach reported near Chilmari", hazard: "Flood", location: "Kurigram", reportedAt: "09 Sep 2026, 07:20", status: "pending", source: "News scrape" },
-  { id: "cr-87", title: "Riverine flooding displaces households in Islampur", hazard: "Flood", location: "Jamalpur", reportedAt: "09 Sep 2026, 06:05", status: "validated", source: "News scrape" },
-  { id: "cr-86", title: "Heavy rainfall warning issued for northern districts", hazard: "Heavy rain", location: "Rangpur division", reportedAt: "08 Sep 2026, 20:40", status: "validated", source: "BMD bulletin" },
-  { id: "cr-85", title: "Local road submerged, market access disrupted", hazard: "Flood", location: "Gaibandha", reportedAt: "08 Sep 2026, 15:10", status: "pending", source: "News scrape" },
-];
-
 export type Activity = {
   id: string;
   name: string;

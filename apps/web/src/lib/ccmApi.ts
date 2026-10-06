@@ -260,3 +260,98 @@ export function resultsCsvUrl(filters: CCMFilters): string {
   }
   return `${base}/ccm/cyclones/${filters.cyclone}/results.csv?${params.toString()}`;
 }
+
+/* -------------------------------------------------------------- model runs */
+
+export type RunStatus = "queued" | "running" | "succeeded" | "failed";
+
+export type CCMRun = {
+  id: number;
+  cyclone_code: string;
+  status: RunStatus;
+  cyclone_id: number | null;
+  cyclone_name: string | null;
+  row_count: number | null;
+  error: string | null;
+  took_ms: number | null;
+  created_at: string;
+  finished_at: string | null;
+};
+
+/** The simulation files a run needs. `required` drives the form's validation. */
+export const RUN_FILE_FIELDS = [
+  { field: "water_depth_xyz", label: "Water Depth", hint: "Water Depth.xyz", required: true },
+  { field: "wind_speed_xyz", label: "Wind Speed", hint: "Wind Speed.xyz", required: true },
+  { field: "rain_csv", label: "Rainfall", hint: "Rain.csv", required: true },
+  { field: "track_shp", label: "Track — .shp", hint: "Track.shp", required: true },
+  { field: "track_shx", label: "Track — .shx", hint: "Track.shx", required: true },
+  { field: "track_dbf", label: "Track — .dbf", hint: "Track.dbf", required: true },
+  { field: "track_prj", label: "Track — .prj", hint: "Track.prj", required: false },
+  { field: "track_cpg", label: "Track — .cpg", hint: "Track.cpg", required: false },
+] as const;
+
+/**
+ * Thrust force can arrive either already computed, or as the three grids the
+ * model derives it from. Exactly one of these two groups is needed.
+ */
+export const THRUST_FORCE_FIELDS = [
+  { field: "thrust_force_csv", label: "Thrust Force (pre-computed)", hint: "Thrush Force.csv" },
+  { field: "water_depth_tf_xyz", label: "Water Depth (TF grid)", hint: "Water Depth-TF.xyz" },
+  { field: "wind_speed_tf_xyz", label: "Wind Speed (TF grid)", hint: "Wind Speed-TF.xyz" },
+  {
+    field: "depth_avg_velocity_tf_xyz",
+    label: "Depth-Averaged Velocity (TF grid)",
+    hint: "Depth Averaged Velocity-TF.xyz",
+  },
+] as const;
+
+export type RunMeta = {
+  cyclone_code: string;
+  name?: string;
+  event_date?: string;
+  landfall_location?: string;
+  max_wind_speed?: string;
+  remark?: string;
+  cyclone_type?: string;
+};
+
+/** Starts a run. Resolves as soon as the server accepts it, not when it finishes. */
+export async function startRun(
+  meta: RunMeta,
+  files: Record<string, File | undefined>,
+): Promise<{ id: number; cyclone_code: string; status: RunStatus }> {
+  const form = new FormData();
+  for (const [key, value] of Object.entries(meta)) {
+    if (value !== undefined && value !== "") form.append(key, value);
+  }
+  for (const [field, file] of Object.entries(files)) {
+    if (file) form.append(field, file);
+  }
+  const { data } = await api.post("/ccm/runs", form);
+  return data;
+}
+
+export function useRuns(limit = 20) {
+  return useQuery({
+    queryKey: ["ccm", "runs", limit] as const,
+    queryFn: async () => (await api.get<CCMRun[]>("/ccm/runs", { params: { limit } })).data,
+    // A run in flight should show progress without the operator reloading.
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((r) => r.status === "queued" || r.status === "running")
+        ? 5_000
+        : false,
+  });
+}
+
+/** Polls one run while it is in flight, then stops. */
+export function useRun(runId: number | null) {
+  return useQuery({
+    queryKey: ["ccm", "run", runId] as const,
+    queryFn: async () => (await api.get<CCMRun>(`/ccm/runs/${runId}`)).data,
+    enabled: runId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 3_000 : false;
+    },
+  });
+}

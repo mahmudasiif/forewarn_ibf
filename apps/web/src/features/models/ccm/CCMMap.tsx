@@ -13,17 +13,16 @@ const ZOOM = 7;
 const MAX_ZOOM = 16;
 
 /**
- * Esri's light grey canvas. Free to use without a key, and deliberately
- * desaturated — the design guideline wants the base map quiet so the data is
- * the only saturated colour on screen. Labels come as a separate layer so they
- * can sit *above* the choropleth and stay readable.
+ * Plain OpenStreetMap, one tile layer, no overlays on top of it. The earlier
+ * Esri grey-canvas setup stacked a second "labels" layer above the choropleth
+ * to keep place names readable; that is dropped here in favour of the single
+ * standard OSM layer the rest of the deployment uses, so every map in the
+ * portal reads the same way and there is one less third-party tile service in
+ * the path.
  */
-const ESRI_BASE =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}";
-const ESRI_LABELS =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}";
-const ESRI_ATTRIBUTION =
-  'Tiles &copy; <a href="https://www.esri.com/">Esri</a> — Esri, DeLorme, NAVTEQ';
+const OSM_TILES = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const OSM_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 type CCMMapProps = {
   data: MapResponse | undefined;
@@ -36,9 +35,9 @@ type CCMMapProps = {
 };
 
 /**
- * Administrative outlines sit in their own pane between the choropleth (400)
- * and the place-name labels (450), and never take pointer events, so hovering
- * a union still hits the union and not the line drawn on top of it.
+ * Administrative outlines sit in their own pane above the choropleth (400),
+ * and never take pointer events, so hovering a union still hits the union and
+ * not the line drawn on top of it.
  */
 const BOUNDARY_PANE_Z = 440;
 
@@ -59,10 +58,31 @@ const DIVISION_LINE: PathOptions = {
   interactive: false,
 };
 
+/**
+ * A cheap content fingerprint of a FeatureCollection: length plus a djb2 hash
+ * over each feature's id and value. Leaflet does not diff GeoJSON — the
+ * react-leaflet GeoJSON layer only rebuilds when its React key changes — so
+ * every layer below keys on this signature. Counts and metric min/max are NOT
+ * enough: Mocha and Remal both return 1,573 unions spanning risk 0–100, so a
+ * count-based key never changed between them and the map kept painting the
+ * previous cyclone's polygons while the panel said otherwise.
+ */
+function signature(data: { features: Feature[] } | undefined): string {
+  if (!data || data.features.length === 0) return "empty";
+  let hash = 5381;
+  for (const feature of data.features) {
+    const chunk = `${feature.id}:${feature.properties?.value ?? "∅"}|`;
+    for (let i = 0; i < chunk.length; i++) {
+      hash = ((hash << 5) + hash + chunk.charCodeAt(i)) | 0;
+    }
+  }
+  return `${data.features.length}-${hash}`;
+}
+
 /** Zoom to whatever is currently shown, so drilling into a district reframes. */
 function FitToData({ data }: { data: MapResponse | undefined }) {
   const map = useMap();
-  const signature = `${data?.feature_count}-${data?.features?.[0]?.id ?? ""}`;
+  const fingerprint = signature(data);
 
   useEffect(() => {
     if (!data || data.features.length === 0) return;
@@ -75,7 +95,7 @@ function FitToData({ data }: { data: MapResponse | undefined }) {
       // A malformed geometry should never take the whole map down.
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signature, map]);
+  }, [fingerprint, map]);
 
   return null;
 }
@@ -92,8 +112,10 @@ export function CCMMap({
     [data?.metric_unit, data?.metric_min, data?.metric_max],
   );
 
-  // Re-key the layer whenever the data changes — Leaflet will not diff GeoJSON.
-  const layerKey = `${data?.metric}-${data?.feature_count}-${data?.metric_min}-${data?.metric_max}`;
+  // Re-key the layer whenever the *content* changes, not just the counts —
+  // see the signature() comment for why counts alone kept two different
+  // cyclones looking identical on the map.
+  const layerKey = `choropleth-${data?.metric ?? "none"}-${signature(data)}`;
 
   const style = (feature?: Feature<Geometry, Record<string, unknown>>): PathOptions => {
     const value = feature?.properties?.value as number | null | undefined;
@@ -144,7 +166,7 @@ export function CCMMap({
         className="h-full w-full rounded-b-card"
         style={{ background: "#EFF4F7" }}
       >
-        <TileLayer url={ESRI_BASE} attribution={ESRI_ATTRIBUTION} maxZoom={MAX_ZOOM} />
+        <TileLayer url={OSM_TILES} attribution={OSM_ATTRIBUTION} maxZoom={MAX_ZOOM} />
 
         {data && data.features.length > 0 && (
           <GeoJSON
@@ -155,32 +177,27 @@ export function CCMMap({
           />
         )}
 
-        {/* District and division outlines. Re-keyed on feature_count so
-            Leaflet redraws them when the filtered area changes. */}
+        {/* District and division outlines. Re-keyed on content, same as the
+            choropleth — two different selections can produce the same number
+            of outline features, which would otherwise keep the old lines. */}
         <Pane
           name="admin-boundaries"
           style={{ zIndex: BOUNDARY_PANE_Z, pointerEvents: "none" }}
         >
           {districts && districts.features.length > 0 && (
             <GeoJSON
-              key={`district-${districts.feature_count}`}
+              key={`district-${signature(districts)}`}
               data={districts as never}
               style={() => DISTRICT_LINE}
             />
           )}
           {divisions && divisions.features.length > 0 && (
             <GeoJSON
-              key={`division-${divisions.feature_count}`}
+              key={`division-${signature(divisions)}`}
               data={divisions as never}
               style={() => DIVISION_LINE}
             />
           )}
-        </Pane>
-
-        {/* Place names sit above the choropleth so they stay readable.
-            Clicks pass straight through to the unions underneath. */}
-        <Pane name="labels" style={{ zIndex: 450, pointerEvents: "none" }}>
-          <TileLayer url={ESRI_LABELS} maxZoom={MAX_ZOOM} />
         </Pane>
 
         <FitToData data={data} />

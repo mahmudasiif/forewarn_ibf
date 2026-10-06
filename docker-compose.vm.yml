@@ -108,8 +108,10 @@ services:
     env_file: [.env]
     volumes:
       - ./services/ccm/weights:/app/weights:ro
+      # The model joins every run against these boundaries and lookup tables.
+      - ./data:/data:ro
     restart: always
-    # No ports: — the portal's model-service stub; not public.
+    # No ports: — reached only by the API over the compose network.
 
   preparedness:
     build:
