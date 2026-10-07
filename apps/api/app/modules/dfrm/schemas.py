@@ -19,6 +19,9 @@ class MapBody(BaseModel):
     wl_kind: WLKind = "WL"
     limb: str = "Flood Increasing"
     simplify: float = 0.0
+    #: whether to record this query in the audit trail (the forecast page sets
+    #: this false for its on-demand upazila/union maps so they don't inflate it)
+    record: bool = True
 
 
 class WarningBody(BaseModel):
@@ -67,6 +70,7 @@ class ForecastDayOut(BaseModel):
     phase: str
     area_id: str
     area_name: str
+    layer: str
     river: str
     station: str
     hydrograph_day: str | None = None

@@ -107,6 +107,8 @@ class DfrmForecastDay(Base):
 
     area_id: Mapped[str] = mapped_column(String(20))
     area_name: Mapped[str] = mapped_column(String(120))
+    #: Inundation | Hazard | Risk | Vulnerability
+    layer: Mapped[str] = mapped_column(String(20), default="Inundation")
     river: Mapped[str] = mapped_column(String(20))
     station: Mapped[str] = mapped_column(String(60))
 

@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Feature } from "geojson";
 
 import { api } from "@/lib/api";
@@ -92,6 +92,8 @@ export type MapRequest = {
   wl_kind: WLKind;
   limb: string;
   simplify?: number;
+  /** false = don't record this query in the audit trail (forecast live maps) */
+  record?: boolean;
 };
 
 export type WarningRequest = {
@@ -133,6 +135,7 @@ export type ForecastDay = {
   phase: string;
   area_id: string;
   area_name: string;
+  layer: MapLayer;
   river: string;
   station: string;
   hydrograph_day: string | null;
@@ -214,6 +217,61 @@ export function useForecastDayMap(dayId: number | null) {
     enabled: dayId != null,
     staleTime: Infinity,
   });
+}
+
+/** Generate a forecast map live (upazila/union drill-down not pre-generated).
+ *  Uses the selected day's automated water level + limb; not recorded in audit. */
+export function useLiveForecastMap(req: MapRequest | null) {
+  return useQuery({
+    queryKey: ["dfrm", "forecast", "live", req],
+    queryFn: async () =>
+      (await api.post<MapResponse>("/dfrm/map", { ...req, record: false })).data,
+    enabled: req != null,
+    staleTime: Infinity,
+  });
+}
+
+/** Fetch several day maps at once (e.g. both districts), to merge into one view. */
+export function useForecastDayMaps(dayIds: number[]) {
+  const queries = useQueries({
+    queries: dayIds.map((id) => ({
+      queryKey: ["dfrm", "forecast", "day", id, "map"],
+      queryFn: async () => (await api.get<MapResponse>(`/dfrm/forecast/day/${id}/map`)).data,
+      staleTime: Infinity,
+    })),
+  });
+  const data = queries.map((q) => q.data).filter((d): d is MapResponse => d != null);
+  return {
+    maps: data,
+    isLoading: queries.some((q) => q.isLoading),
+    isError: queries.length > 0 && queries.every((q) => q.isError),
+  };
+}
+
+/** Merge several district maps (same day/layer) into one basin-wide MapResponse. */
+export function mergeMaps(maps: MapResponse[]): MapResponse | undefined {
+  if (maps.length === 0) return undefined;
+  const base = maps[0];
+  const fc = (features: Feature[]) =>
+    ({ type: "FeatureCollection" as const, features });
+  const mins = maps.map((m) => m.metric_min).filter((v): v is number => v != null);
+  const maxs = maps.map((m) => m.metric_max).filter((v): v is number => v != null);
+  return {
+    ...base,
+    area_name: maps.map((m) => m.area_name).join(" & "),
+    feature_count: maps.reduce((n, m) => n + m.feature_count, 0),
+    metric_min: mins.length ? Math.min(...mins) : null,
+    metric_max: maxs.length ? Math.max(...maxs) : null,
+    features: maps.flatMap((m) => m.features),
+    rivers: {
+      corridor: fc(maps.flatMap((m) => m.rivers.corridor.features)),
+      active: fc(maps.flatMap((m) => m.rivers.active.features)),
+    },
+    context: {
+      upazila: fc(maps.flatMap((m) => m.context.upazila.features)),
+      district: fc(maps.flatMap((m) => m.context.district.features)),
+    },
+  };
 }
 
 /** URL for the warning CSV export — the web equivalent of the tool's "Save". */
