@@ -1,15 +1,22 @@
 # --- project brain (local only) ---
-Documents/
-Claude outputs/
+# Every rule in this block is anchored with a leading slash so it matches ONLY
+# at the repository root. Without the slash, git matches the pattern at any
+# depth -- and because git on Windows sets core.ignorecase=true, a bare `CCM/`
+# also matched `apps/api/app/modules/ccm/` and `services/ccm/`, silently
+# dropping every NEW file in those modules from commits. (Already-tracked
+# files kept committing, which is what made it so hard to see.) Keep the
+# leading slash on anything in this block.
+/Documents/
+/Claude outputs/
 
 # --- local tooling / vendored source drops (never commit) ---
-graphify-out/
-Cyclone-AI-Guideline-Handover/
-DFRM/
-GIS Layers/
-GIS_Layers/
-CCM/
-CCM_v2.9.3/
+/graphify-out/
+/Cyclone-AI-Guideline-Handover/
+/DFRM/
+/GIS Layers/
+/GIS_Layers/
+/CCM/
+/CCM_v2.9.3/
 
 # stray root lockfile (there is no root package.json — the app lives in apps/web)
 /package-lock.json
