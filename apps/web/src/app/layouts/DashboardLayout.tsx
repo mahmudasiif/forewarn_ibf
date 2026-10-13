@@ -11,6 +11,11 @@ import {
 } from "lucide-react";
 
 import { NAV, type NavItem } from "@/lib/nav";
+import {
+  DEFAULT_TOP_BAR_LINE,
+  PageHeadingProvider,
+  useTopBarHeading,
+} from "@/lib/pageHeading";
 import { cn } from "@/lib/utils";
 
 const COLLAPSE_KEY = "forewarn.sidebar.collapsed";
@@ -65,7 +70,10 @@ function NavGroup({ item, pathname }: { item: NavItem; pathname: string }) {
         <Icon className="size-4 shrink-0" />
         <span className="flex-1 font-medium">{item.label}</span>
         <ChevronDown
-          className={cn("size-4 shrink-0 transition-transform", isOpen && "rotate-180")}
+          className={cn(
+            "size-4 shrink-0 transition-transform",
+            isOpen && "rotate-180",
+          )}
         />
       </button>
 
@@ -80,7 +88,9 @@ function NavGroup({ item, pathname }: { item: NavItem; pathname: string }) {
                   "text-navy-200 hover:bg-white/5 hover:text-white",
                   "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-500",
                 )}
-                activeProps={{ className: "bg-white/10 text-white font-medium" }}
+                activeProps={{
+                  className: "bg-white/10 text-white font-medium",
+                }}
                 activeOptions={{ exact: true }}
               >
                 <span className="min-w-0 flex-1 truncate">{child.label}</span>
@@ -127,7 +137,9 @@ function SidebarNav({ pathname }: { pathname: string }) {
                     "text-navy-200 hover:bg-white/5 hover:text-white",
                     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-green-500",
                   )}
-                  activeProps={{ className: "bg-white/10 text-white font-medium" }}
+                  activeProps={{
+                    className: "bg-white/10 text-white font-medium",
+                  }}
                   activeOptions={{ exact: true }}
                 >
                   <item.icon className="size-4 shrink-0" />
@@ -159,7 +171,9 @@ function SidebarNav({ pathname }: { pathname: string }) {
  * open when you come back is just in the way.
  */
 export function DashboardLayout() {
-  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(readCollapsed);
 
@@ -194,113 +208,153 @@ export function DashboardLayout() {
   }, [pathname]);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-navy-50">
-      <aside
-        className={cn(
-          "fixed inset-y-0 left-0 z-40 w-64 shrink-0 overflow-hidden bg-navy-900",
-          "transition-transform duration-200",
-          mobileOpen ? "translate-x-0" : "-translate-x-full",
-          // On desktop it is part of the layout and animates its width instead.
-          "lg:static lg:translate-x-0 lg:transition-[width] lg:duration-200",
-          collapsed ? "lg:w-0" : "lg:w-64",
+    // The provider wraps the whole frame so the routed page below can set the
+    // line the top bar shows, without the layout re-rendering on every change.
+    <PageHeadingProvider>
+      <div className="flex h-screen overflow-hidden bg-navy-50">
+        <aside
+          className={cn(
+            "fixed inset-y-0 left-0 z-40 w-64 shrink-0 overflow-hidden bg-navy-900",
+            "transition-transform duration-200",
+            mobileOpen ? "translate-x-0" : "-translate-x-full",
+            // On desktop it is part of the layout and animates its width instead.
+            "lg:static lg:translate-x-0 lg:transition-[width] lg:duration-200",
+            collapsed ? "lg:w-0" : "lg:w-64",
+          )}
+          aria-hidden={collapsed ? undefined : false}
+        >
+          {/* Fixed inner width so the contents do not reflow mid-animation */}
+          <div className="flex h-full w-64 flex-col">
+            <div className="shrink-0">
+              <BrandMark />
+            </div>
+            <SidebarNav pathname={pathname} />
+            <div className="shrink-0 border-t border-white/10 px-5 py-4">
+              <p className="text-[10px] leading-relaxed text-navy-200/70">
+                A programme of the
+                <br />
+                <span className="text-green-500">Start Bangladesh Hub</span>
+              </p>
+            </div>
+          </div>
+        </aside>
+
+        {mobileOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-navy-900/50 lg:hidden"
+            onClick={() => setMobileOpen(false)}
+            aria-hidden
+          />
         )}
-        aria-hidden={collapsed ? undefined : false}
-      >
-        {/* Fixed inner width so the contents do not reflow mid-animation */}
-        <div className="flex h-full w-64 flex-col">
-          <div className="shrink-0">
-            <BrandMark />
-          </div>
-          <SidebarNav pathname={pathname} />
-          <div className="shrink-0 border-t border-white/10 px-5 py-4">
-            <p className="text-[10px] leading-relaxed text-navy-200/70">
-              A programme of the
-              <br />
-              <span className="text-green-500">Start Bangladesh Hub</span>
-            </p>
-          </div>
-        </div>
-      </aside>
 
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-navy-900/50 lg:hidden"
-          onClick={() => setMobileOpen(false)}
-          aria-hidden
-        />
-      )}
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 lg:px-6">
+            <div className="flex items-center gap-3">
+              {/* Phone: opens the drawer */}
+              <button
+                type="button"
+                onClick={() => setMobileOpen((value) => !value)}
+                className="rounded-lg p-2 text-navy-700 hover:bg-navy-50 lg:hidden"
+                aria-label={mobileOpen ? "Close menu" : "Open menu"}
+              >
+                {mobileOpen ? (
+                  <X className="size-5" />
+                ) : (
+                  <Menu className="size-5" />
+                )}
+              </button>
 
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 lg:px-6">
-          <div className="flex items-center gap-3">
-            {/* Phone: opens the drawer */}
-            <button
-              type="button"
-              onClick={() => setMobileOpen((value) => !value)}
-              className="rounded-lg p-2 text-navy-700 hover:bg-navy-50 lg:hidden"
-              aria-label={mobileOpen ? "Close menu" : "Open menu"}
-            >
-              {mobileOpen ? <X className="size-5" /> : <Menu className="size-5" />}
-            </button>
+              {/* Desktop: collapses the sidebar into the page */}
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                className="hidden rounded-lg p-2 text-navy-700 hover:bg-navy-50 lg:inline-flex"
+                aria-label={collapsed ? "Show sidebar" : "Hide sidebar"}
+                title={`${collapsed ? "Show" : "Hide"} sidebar  (Ctrl+B)`}
+              >
+                {collapsed ? (
+                  <PanelLeftOpen className="size-5" />
+                ) : (
+                  <PanelLeftClose className="size-5" />
+                )}
+              </button>
 
-            {/* Desktop: collapses the sidebar into the page */}
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              className="hidden rounded-lg p-2 text-navy-700 hover:bg-navy-50 lg:inline-flex"
-              aria-label={collapsed ? "Show sidebar" : "Hide sidebar"}
-              title={`${collapsed ? "Show" : "Hide"} sidebar  (Ctrl+B)`}
-            >
-              {collapsed ? (
-                <PanelLeftOpen className="size-5" />
-              ) : (
-                <PanelLeftClose className="size-5" />
-              )}
-            </button>
-
-            {/* The wordmark reappears here when the sidebar is away, so the
+              {/* The wordmark reappears here when the sidebar is away, so the
                 page never loses its identity or a way back home. */}
-            {collapsed && (
-              <Link to="/" className="hidden items-center lg:flex">
-                <span className="font-display text-base font-bold uppercase tracking-wide text-navy-900">
-                  FOREWARN
+              {collapsed && (
+                <Link to="/" className="hidden items-center lg:flex">
+                  <span className="font-display text-base font-bold uppercase tracking-wide text-navy-900">
+                    FOREWARN
+                  </span>
+                  <span className="font-display ml-1.5 text-xs font-medium uppercase tracking-[0.2em] text-green-700">
+                    BD
+                  </span>
+                </Link>
+              )}
+            </div>
+
+            {/* A map screen puts its own title here and drops its page header
+              altogether, which buys back the height that header used to take.
+              Anything else leaves it and shows the portal-wide line. */}
+            <TopBarHeading />
+
+            <div className="flex items-center gap-2">
+              <Link
+                to="/profile"
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-navy-700 hover:bg-navy-50"
+              >
+                <span className="flex size-7 items-center justify-center rounded-full bg-accent">
+                  <UserRound className="size-4 text-green-700" />
                 </span>
-                <span className="font-display ml-1.5 text-xs font-medium uppercase tracking-[0.2em] text-green-700">
-                  BD
-                </span>
+                <span className="hidden sm:inline">M. Saleheen</span>
               </Link>
-            )}
-          </div>
+              <Link
+                to="/login"
+                className="rounded-lg p-2 text-muted-foreground hover:bg-navy-50 hover:text-navy-900"
+                aria-label="Sign out"
+              >
+                <LogOut className="size-4" />
+              </Link>
+            </div>
+          </header>
 
-          <p className="hidden text-xs text-muted-foreground xl:block">
-            Anticipatory action for Bangladesh · data shown in Asia/Dhaka (+06)
-          </p>
-
-          <div className="flex items-center gap-2">
-            <Link
-              to="/profile"
-              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-navy-700 hover:bg-navy-50"
-            >
-              <span className="flex size-7 items-center justify-center rounded-full bg-accent">
-                <UserRound className="size-4 text-green-700" />
-              </span>
-              <span className="hidden sm:inline">M. Saleheen</span>
-            </Link>
-            <Link
-              to="/login"
-              className="rounded-lg p-2 text-muted-foreground hover:bg-navy-50 hover:text-navy-900"
-              aria-label="Sign out"
-            >
-              <LogOut className="size-4" />
-            </Link>
-          </div>
-        </header>
-
-        {/* The only scrolling region on the page */}
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-          <Outlet />
-        </main>
+          {/* The only scrolling region on the page */}
+          <main className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+            <Outlet />
+          </main>
+        </div>
       </div>
+    </PageHeadingProvider>
+  );
+}
+
+/**
+ * The middle of the top bar.
+ *
+ * Its own component so that a page setting its heading re-renders this line
+ * alone, not the sidebar and the routed page with it.
+ */
+function TopBarHeading() {
+  const heading = useTopBarHeading();
+
+  if (!heading) {
+    return (
+      <p className="hidden text-xs text-muted-foreground xl:block">
+        {DEFAULT_TOP_BAR_LINE}
+      </p>
+    );
+  }
+
+  return (
+    <div className="hidden min-w-0 items-center gap-2 lg:flex">
+      <h1 className="font-display truncate text-sm font-semibold uppercase tracking-wide text-navy-900">
+        {heading.title}
+      </h1>
+      {heading.module && (
+        <span className="shrink-0 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {heading.module}
+        </span>
+      )}
     </div>
   );
 }

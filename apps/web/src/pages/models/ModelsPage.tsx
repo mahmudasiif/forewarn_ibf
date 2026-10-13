@@ -20,9 +20,17 @@ function fmtRunTime(iso: string): string {
 }
 
 const runColumns: Column<ModelRun>[] = [
-  { key: "id", header: "Run", render: (row) => <span className="font-mono text-xs">{row.id}</span> },
+  {
+    key: "id",
+    header: "Run",
+    render: (row) => <span className="font-mono text-xs">{row.id}</span>,
+  },
   { key: "model", header: "Model", render: (row) => row.model },
-  { key: "trigger", header: "Trigger", render: (row) => <span className="capitalize">{row.trigger}</span> },
+  {
+    key: "trigger",
+    header: "Trigger",
+    render: (row) => <span className="capitalize">{row.trigger}</span>,
+  },
   {
     key: "status",
     header: "Status",
@@ -34,20 +42,32 @@ const runColumns: Column<ModelRun>[] = [
         failed: "bg-sunrise-100 text-navy-900",
       };
       return (
-        <span className={cn("rounded-full px-2.5 py-0.5 text-xs font-medium capitalize", map[row.status])}>
+        <span
+          className={cn(
+            "rounded-full px-2.5 py-0.5 text-xs font-medium capitalize",
+            map[row.status],
+          )}
+        >
           {row.status}
         </span>
       );
     },
   },
   { key: "startedAt", header: "Started", render: (row) => row.startedAt },
-  { key: "duration", header: "Duration", numeric: true, render: (row) => row.duration },
+  {
+    key: "duration",
+    header: "Duration",
+    numeric: true,
+    render: (row) => row.duration,
+  },
 ];
 
 export default function ModelsPage() {
   // DFRM is the one model with a live query history; fold its real runs in.
   const dfrmRuns = useDfrmRuns(50);
-  const dfrmLastRun = dfrmRuns.data?.[0] ? fmtRunTime(dfrmRuns.data[0].created_at) : null;
+  const dfrmLastRun = dfrmRuns.data?.[0]
+    ? fmtRunTime(dfrmRuns.data[0].created_at)
+    : null;
 
   const lastRunFor = (id: string, fallback: string): string =>
     id === "dfrm" && dfrmLastRun ? dfrmLastRun : fallback;
@@ -90,7 +110,9 @@ export default function ModelsPage() {
                 <StatusDot status={model.status} />
               </div>
 
-              <p className="mt-3 text-sm leading-relaxed text-navy-700">{model.description}</p>
+              <p className="mt-3 text-sm leading-relaxed text-navy-700">
+                {model.description}
+              </p>
 
               <dl className="mt-4 space-y-1.5 border-t border-navy-200 pt-3 text-xs">
                 <div className="flex justify-between gap-2">
@@ -99,7 +121,9 @@ export default function ModelsPage() {
                 </div>
                 <div className="flex justify-between gap-2">
                   <dt className="text-navy-500">Last run</dt>
-                  <dd className="tabular-nums text-navy-900">{lastRunFor(model.id, model.lastRun)}</dd>
+                  <dd className="tabular-nums text-navy-900">
+                    {lastRunFor(model.id, model.lastRun)}
+                  </dd>
                 </div>
               </dl>
 
@@ -116,7 +140,11 @@ export default function ModelsPage() {
           subtitle="Across all registered models"
           bodyClassName="p-0"
         >
-          <DataTable columns={runColumns} rows={runRows} rowKey={(row) => row.id} />
+          <DataTable
+            columns={runColumns}
+            rows={runRows}
+            rowKey={(row) => row.id}
+          />
         </Card>
       </div>
     </>

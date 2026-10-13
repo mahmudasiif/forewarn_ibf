@@ -27,6 +27,8 @@ from app.modules.ccm.schemas import (
     ResultPage,
     RunAccepted,
     RunSummary,
+    ThresholdMode,
+    TrackResponse,
 )
 
 router = APIRouter(prefix="/ccm", tags=["CCM"])
@@ -72,10 +74,20 @@ async def get_results(
     metric: str | None = None,
     operator: Operator | None = None,
     threshold: float | None = None,
+    threshold_mode: ThresholdMode = "value",
+    lead_time_hours: Annotated[int | None, Query(ge=0, le=168)] = None,
     page: int = 1,
     size: int = 50,
 ) -> dict:
-    """The results table, aggregated to the requested administrative level."""
+    """The results table, aggregated to the requested administrative level.
+
+    `threshold_mode=return_period` reads `threshold` as a number of years and
+    keeps the unions where this cyclone is worse than their own T-year event,
+    rather than comparing the trigger metric to a flat number.
+
+    `lead_time_hours` adds the four NEAP columns — the lead time itself and the
+    impact number for wind, storm surge and rainfall.
+    """
     return await service.results(
         db,
         code=code,
@@ -86,6 +98,8 @@ async def get_results(
         metric=metric,
         operator=operator,
         threshold=threshold,
+        threshold_mode=threshold_mode,
+        lead_time_hours=lead_time_hours,
         page=page,
         size=size,
     )
@@ -96,25 +110,40 @@ async def get_map(
     code: str,
     db: DbSession,
     metric: str | None = None,
+    level: AdminLevel = "union",
     division: str | None = None,
     district: str | None = None,
     upazila: str | None = None,
     operator: Operator | None = None,
     threshold: float | None = None,
+    threshold_mode: ThresholdMode = "value",
     simplify: float = 0.001,
 ) -> dict:
-    """Union polygons with the selected metric attached, as GeoJSON."""
+    """Polygons for the chosen level, with the metric attached, as GeoJSON.
+
+    At union level these are the 1,585 union polygons. Above it they are the
+    upazilas, districts or divisions dissolved from those unions and carrying
+    the aggregated figure, so the map shows the same areas the table lists.
+    """
     return await service.map_features(
         db,
         code=code,
         metric=metric,
+        level=level,
         division=division,
         district=district,
         upazila=upazila,
         operator=operator,
         threshold=threshold,
+        threshold_mode=threshold_mode,
         simplify=simplify,
     )
+
+
+@router.get("/cyclones/{code}/track", response_model=TrackResponse)
+async def get_track(code: str, db: DbSession) -> dict:
+    """The cyclone's track line, for drawing over the map."""
+    return await service.get_track(db, code)
 
 
 @router.get("/cyclones/{code}/boundaries", response_model=BoundaryResponse)
@@ -139,6 +168,70 @@ async def get_boundaries(
     )
 
 
+#: Spreadsheet-friendly headers for the download. Anything not listed keeps
+#: its raw column name — a new metric still exports, it just exports unlabelled
+#: until someone names it here.
+EXPORT_HEADERS: dict[str, str] = {
+    "union_geo": "Union_Geo",
+    "division": "Division",
+    "district": "District",
+    "upazila": "Upazila",
+    "union_name": "Union",
+    "surge_height_m": "Surge Height (m)",
+    "wind_speed_kmh": "Wind Speed (km/hr)",
+    "thrust_force": "Thrust Force",
+    "rainfall_72h_mm": "72hr Cumulative Rainfall (mm)",
+    "polder_damage": "Polder Damage Condition",
+    "structure_damage": "Structure Damage Condition",
+    "agri_land_damage": "Agricultural Land Damage Condition",
+    "flooded_area_km2": "Flooded Area (Km2)",
+    "flooded_area_pct": "Percentage of Flooded Area",
+    "house_damage_million_bdt": "House Damage in Million BDT",
+    "affected_houses": "Total Number of Affected House",
+    "affected_people": "Total Number of Affected People",
+    "affected_people_pct": "Percentage of Affected People",
+    "hazard_pct": "Hazard (%)",
+    "vulnerability_pct": "Vulnerability (%)",
+    "risk_pct": "Risk (%)",
+    "lead_time_hours": "Lead Time in Hours",
+    "neap_wind": "NEAP Risk Impact Number for Wind",
+    "neap_surge": "NEAP Risk Impact Number for Surge",
+    "neap_rain": "NEAP Risk Impact Number for Rain",
+}
+
+
+async def _export_payload(
+    db: DbSession,
+    code: str,
+    level: AdminLevel,
+    division: str | None,
+    district: str | None,
+    upazila: str | None,
+    metric: str | None,
+    operator: Operator | None,
+    threshold: float | None,
+    threshold_mode: ThresholdMode,
+    lead_time_hours: int | None,
+) -> tuple[list[str], list[str], list[dict]]:
+    """Run the current filters unpaged and return (keys, headers, rows)."""
+    payload = await service.export_rows(
+        db,
+        code=code,
+        level=level,
+        division=division,
+        district=district,
+        upazila=upazila,
+        metric=metric,
+        operator=operator,
+        threshold=threshold,
+        threshold_mode=threshold_mode,
+        lead_time_hours=lead_time_hours,
+    )
+    rows = payload["items"]
+    keys = list(rows[0].keys()) if rows else []
+    return keys, [EXPORT_HEADERS.get(k, k) for k in keys], rows
+
+
 @router.get("/cyclones/{code}/results.csv")
 async def export_results_csv(
     code: str,
@@ -150,38 +243,97 @@ async def export_results_csv(
     metric: str | None = None,
     operator: Operator | None = None,
     threshold: float | None = None,
+    threshold_mode: ThresholdMode = "value",
+    lead_time_hours: Annotated[int | None, Query(ge=0, le=168)] = None,
 ) -> StreamingResponse:
-    """The current table as CSV — the web equivalent of the tool's 'Save Table'."""
+    """The whole filtered table as CSV — the tool's 'Save Table', unpaged."""
     import csv
     import io
 
-    payload = await service.results(
-        db,
-        code=code,
-        level=level,
-        division=division,
-        district=district,
-        upazila=upazila,
-        metric=metric,
-        operator=operator,
-        threshold=threshold,
-        page=1,
-        size=2000,
+    keys, headers, rows = await _export_payload(
+        db, code, level, division, district, upazila,
+        metric, operator, threshold, threshold_mode, lead_time_hours,
     )
-    rows = payload["items"]
 
     buffer = io.StringIO()
-    if rows:
-        writer = csv.DictWriter(buffer, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
+    writer = csv.writer(buffer)
+    if keys:
+        writer.writerow(headers)
+        writer.writerows([row.get(k) for k in keys] for row in rows)
 
+    # Excel reads a bare UTF-8 CSV as Windows-1252 and mangles any non-ASCII
+    # place name; the BOM is what tells it otherwise.
+    return StreamingResponse(
+        iter(["\ufeff" + buffer.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="CCM_{code}_{level}.csv"'
+        },
+    )
+
+
+@router.get("/cyclones/{code}/results.xlsx")
+async def export_results_xlsx(
+    code: str,
+    db: DbSession,
+    level: AdminLevel = "union",
+    division: str | None = None,
+    district: str | None = None,
+    upazila: str | None = None,
+    metric: str | None = None,
+    operator: Operator | None = None,
+    threshold: float | None = None,
+    threshold_mode: ThresholdMode = "value",
+    lead_time_hours: Annotated[int | None, Query(ge=0, le=168)] = None,
+) -> StreamingResponse:
+    """The same table as a real .xlsx, which is what the desktop tool saved."""
+    import io
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    keys, headers, rows = await _export_payload(
+        db, code, level, division, district, upazila,
+        metric, operator, threshold, threshold_mode, lead_time_hours,
+    )
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "CCM Results"
+
+    if keys:
+        sheet.append(headers)
+        header_fill = PatternFill("solid", fgColor="053244")  # navy-900
+        for index in range(1, len(headers) + 1):
+            cell = sheet.cell(row=1, column=index)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = header_fill
+            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            # Wide enough for the header, capped so one long label does not
+            # push the numeric columns off the screen.
+            sheet.column_dimensions[get_column_letter(index)].width = min(
+                max(12, len(headers[index - 1]) + 2), 34
+            )
+        sheet.row_dimensions[1].height = 30
+        sheet.freeze_panes = "A2"
+
+        for row in rows:
+            sheet.append([row.get(key) for key in keys])
+
+        sheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
+
+    buffer = io.BytesIO()
+    workbook.save(buffer)
     buffer.seek(0)
-    filename = f"CCM_{code}_{level}.csv"
     return StreamingResponse(
         iter([buffer.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="CCM_{code}_{level}.xlsx"'
+        },
     )
 
 

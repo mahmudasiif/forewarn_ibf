@@ -142,6 +142,99 @@ def read_cyclone_list(data_dir: Path) -> dict[str, dict]:
 UNION_LAYERS = ("CCM_Unions_BBS21", "CCM_Unions_wgs84")
 
 
+def read_track(data_dir: Path, code: str) -> dict | None:
+    """The cyclone's track shapefile, as a GeoJSON FeatureCollection.
+
+    The package stores one shapefile per cyclone under Cyclone_Track/, named
+    after the result CSV. The desktop tool drew it in red over the choropleth;
+    storing it on the cyclone row lets the portal draw the same line without
+    shipping shapefiles to the browser.
+
+    Missing is normal, not an error — some cyclones in the package have no
+    track file, and the map simply draws no line for them.
+    """
+    base = data_dir / "Cyclone_Track" / code
+    if not base.with_suffix(".shp").exists():
+        return None
+
+    reader = shapefile.Reader(str(base))
+    features = [
+        {
+            "type": "Feature",
+            "geometry": record.shape.__geo_interface__,
+            "properties": {
+                key: value
+                for key, value in record.record.as_dict().items()
+                # pyshp hands back date/bytes for some field types; keep the
+                # payload JSON-safe rather than guessing at a serialiser.
+                if isinstance(value, (str, int, float, bool, type(None)))
+            },
+        }
+        for record in reader.iterShapeRecords()
+        if record.shape.shapeType != shapefile.NULL
+    ]
+    if not features:
+        return None
+    return {"type": "FeatureCollection", "features": features}
+
+
+def read_union_stats(data_dir: Path) -> dict[int, tuple[float | None, float | None]]:
+    """Per-union Avg/Std of ln(affected people), for the return-period trigger.
+
+    From Base_info/StructureDamageData.xlsx, sheet Coastal_Housing_info — the
+    same workbook and columns CCM_Main.py joins on when the operator asks for a
+    return period instead of a flat threshold. Returned keyed by Union_Geo.
+
+    An absent workbook is not fatal: everything else imports, and the
+    return-period option is simply unavailable until it is in place.
+    """
+    workbook_path = data_dir / "Base_info" / "StructureDamageData.xlsx"
+    if not workbook_path.exists():
+        print(f"  no {workbook_path.name}; return-period stats skipped")
+        return {}
+
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        print("  openpyxl not installed; return-period stats skipped")
+        return {}
+
+    workbook = load_workbook(workbook_path, read_only=True, data_only=True)
+    if "Coastal_Housing_info" not in workbook.sheetnames:
+        print("  sheet Coastal_Housing_info missing; return-period stats skipped")
+        return {}
+
+    sheet = workbook["Coastal_Housing_info"]
+    rows = sheet.iter_rows(values_only=True)
+    header = [str(cell or "").strip() for cell in next(rows)]
+    try:
+        geo_col = header.index("Union_Geo")
+        avg_col = header.index("Avg")
+        std_col = header.index("Std")
+    except ValueError:
+        print("  Union_Geo/Avg/Std columns not found; return-period stats skipped")
+        return {}
+
+    stats: dict[int, tuple[float | None, float | None]] = {}
+    for row in rows:
+        geo = row[geo_col] if geo_col < len(row) else None
+        if geo in (None, ""):
+            continue
+        stats[int(geo)] = (
+            _as_float(row[avg_col] if avg_col < len(row) else None),
+            _as_float(row[std_col] if std_col < len(row) else None),
+        )
+    workbook.close()
+    return stats
+
+
+def _as_float(value: object) -> float | None:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 async def import_unions(session, data_dir: Path, layer: str | None = None) -> int:
     """Load the union boundaries. Idempotent — re-running refreshes geometry."""
     shapes_dir = data_dir / "Shapefiles"
@@ -156,6 +249,10 @@ async def import_unions(session, data_dir: Path, layer: str | None = None) -> in
 
     reader = shapefile.Reader(str(base))
     print(f"  reading {len(reader)} union polygons …")
+
+    stats = read_union_stats(data_dir)
+    if stats:
+        print(f"  {len(stats)} unions have return-period statistics")
 
     inserted = 0
     for record in reader.iterShapeRecords():
@@ -173,16 +270,25 @@ async def import_unions(session, data_dir: Path, layer: str | None = None) -> in
             text(
                 """
                 INSERT INTO ccm.unions
-                    (union_geo, division, district, upazila, union_name, geom)
+                    (union_geo, division, district, upazila, union_name, geom,
+                     ln_affected_avg, ln_affected_std)
                 VALUES
                     (:union_geo, :division, :district, :upazila, :union_name,
-                     ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(:geom), 4326)))
+                     ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(:geom), 4326)),
+                     :ln_affected_avg, :ln_affected_std)
                 ON CONFLICT (union_geo) DO UPDATE SET
                     division   = EXCLUDED.division,
                     district   = EXCLUDED.district,
                     upazila    = EXCLUDED.upazila,
                     union_name = EXCLUDED.union_name,
-                    geom       = EXCLUDED.geom
+                    geom       = EXCLUDED.geom,
+                    -- Keep what is already stored when the workbook has no
+                    -- figure for this union, so a boundary refresh alone
+                    -- never wipes the return-period statistics.
+                    ln_affected_avg = COALESCE(EXCLUDED.ln_affected_avg,
+                                               ccm.unions.ln_affected_avg),
+                    ln_affected_std = COALESCE(EXCLUDED.ln_affected_std,
+                                               ccm.unions.ln_affected_std)
                 """
             ),
             {
@@ -192,6 +298,8 @@ async def import_unions(session, data_dir: Path, layer: str | None = None) -> in
                 "upazila": (attrs.get("Upazila") or "").strip(),
                 "union_name": (attrs.get("Union") or "").strip(),
                 "geom": json.dumps(geometry),
+                "ln_affected_avg": stats.get(int(union_geo), (None, None))[0],
+                "ln_affected_std": stats.get(int(union_geo), (None, None))[1],
             },
         )
         inserted += 1
@@ -200,9 +308,12 @@ async def import_unions(session, data_dir: Path, layer: str | None = None) -> in
     return inserted
 
 
-async def import_cyclone(session, csv_path: Path, meta: dict, source: str) -> int:
-    """Load one cyclone's result table. Re-running replaces its rows."""
+async def import_cyclone(
+    session, csv_path: Path, meta: dict, source: str, data_dir: Path | None = None
+) -> int:
+    """Load one cyclone's result table and track. Re-running replaces its rows."""
     code = csv_path.stem
+    track = read_track(data_dir, code) if data_dir else None
 
     cyclone_id = (
         await session.execute(
@@ -210,16 +321,21 @@ async def import_cyclone(session, csv_path: Path, meta: dict, source: str) -> in
                 """
                 INSERT INTO ccm.cyclones
                     (code, name, event_date, landfall_location, max_wind_speed,
-                     remark, cyclone_type, source, model_version)
+                     remark, cyclone_type, source, model_version, track_geojson)
                 VALUES
                     (:code, :name, :event_date, :landfall_location, :max_wind_speed,
-                     :remark, :cyclone_type, :source, :model_version)
+                     :remark, :cyclone_type, :source, :model_version,
+                     CAST(:track_geojson AS JSONB))
                 ON CONFLICT (code) DO UPDATE SET
                     name              = EXCLUDED.name,
                     event_date        = EXCLUDED.event_date,
                     landfall_location = EXCLUDED.landfall_location,
                     max_wind_speed    = EXCLUDED.max_wind_speed,
                     remark            = EXCLUDED.remark,
+                    -- Only overwrite the track when this import actually found
+                    -- one, so re-importing a CSV on its own does not erase it.
+                    track_geojson     = COALESCE(EXCLUDED.track_geojson,
+                                                 ccm.cyclones.track_geojson),
                     imported_at       = NOW()
                 RETURNING id
                 """
@@ -234,6 +350,7 @@ async def import_cyclone(session, csv_path: Path, meta: dict, source: str) -> in
                 "cyclone_type": meta.get("cyclone_type", "actual"),
                 "source": source,
                 "model_version": "v2.9.3",
+                "track_geojson": json.dumps(track) if track else None,
             },
         )
     ).scalar_one()
@@ -361,11 +478,12 @@ async def main() -> None:
         total = 0
         for path in files:
             meta = index.get(path.stem, {})
-            rows = await import_cyclone(session, path, meta, args.source)
+            rows = await import_cyclone(session, path, meta, args.source, data_dir)
             total += rows
             label = meta.get("name") or pretty_name(path.stem)
             when = meta.get("event_date")
-            print(f"  {label:<16} {when or '':<12} {rows:>5} unions")
+            track = "track" if (data_dir / "Cyclone_Track" / f"{path.stem}.shp").exists() else "—"
+            print(f"  {label:<16} {when or '':<12} {rows:>5} unions  {track}")
 
         print(f"\nDone. {total} result rows across {len(files)} cyclone(s).")
 

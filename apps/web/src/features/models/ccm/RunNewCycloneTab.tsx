@@ -37,7 +37,10 @@ export function RunNewCycloneTab() {
   const queryClient = useQueryClient();
   const runs = useRuns();
 
-  const [meta, setMeta] = useState<RunMeta>({ cyclone_code: "", cyclone_type: "realtime" });
+  const [meta, setMeta] = useState<RunMeta>({
+    cyclone_code: "",
+    cyclone_type: "realtime",
+  });
   const [files, setFiles] = useState<Files>({});
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -45,10 +48,13 @@ export function RunNewCycloneTab() {
 
   const activeRun = useRun(activeRunId);
 
-  const pickFile = (field: string) => (event: React.ChangeEvent<HTMLInputElement>) =>
-    setFiles((current) => ({ ...current, [field]: event.target.files?.[0] }));
+  const pickFile =
+    (field: string) => (event: React.ChangeEvent<HTMLInputElement>) =>
+      setFiles((current) => ({ ...current, [field]: event.target.files?.[0] }));
 
-  const missingRequired = RUN_FILE_FIELDS.filter((f) => f.required && !files[f.field]);
+  const missingRequired = RUN_FILE_FIELDS.filter(
+    (f) => f.required && !files[f.field],
+  );
   // Thrust force: either the pre-computed CSV, or all three source grids.
   const hasThrustCsv = Boolean(files.thrust_force_csv);
   const hasThrustGrids =
@@ -70,10 +76,15 @@ export function RunNewCycloneTab() {
       void queryClient.invalidateQueries({ queryKey: ["ccm", "runs"] });
     } catch (error) {
       const detail =
-        (error as { response?: { data?: { detail?: string; error?: { message?: string } } } })
-          .response?.data?.detail ??
-        (error as { response?: { data?: { error?: { message?: string } } } }).response?.data
-          ?.error?.message ??
+        (
+          error as {
+            response?: {
+              data?: { detail?: string; error?: { message?: string } };
+            };
+          }
+        ).response?.data?.detail ??
+        (error as { response?: { data?: { error?: { message?: string } } } })
+          .response?.data?.error?.message ??
         "The run could not be started.";
       setSubmitError(String(detail));
     } finally {
@@ -95,10 +106,11 @@ export function RunNewCycloneTab() {
         <div className="flex gap-3 rounded-lg border border-border bg-muted px-4 py-3">
           <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <p className="text-xs leading-relaxed text-navy-700">
-            These files come from the storm-surge modelling run, not from the portal. The model
-            needs the water depth, wind speed and rainfall grids plus the cyclone track, and
-            thrust force — either already computed, or the three grids it is derived from. A run
-            takes a few minutes; you can leave this page while it works.
+            These files come from the storm-surge modelling run, not from the
+            portal. The model needs the water depth, wind speed and rainfall
+            grids plus the cyclone track, and thrust force — either already
+            computed, or the three grids it is derived from. A run takes a few
+            minutes; you can leave this page while it works.
           </p>
         </div>
 
@@ -112,7 +124,9 @@ export function RunNewCycloneTab() {
               id="cyclone_code"
               placeholder="MD19072026_Actual"
               value={meta.cyclone_code}
-              onChange={(e) => setMeta({ ...meta, cyclone_code: e.target.value })}
+              onChange={(e) =>
+                setMeta({ ...meta, cyclone_code: e.target.value })
+              }
             />
             <p className="text-[11px] text-muted-foreground">
               {meta.cyclone_code && !codeValid
@@ -147,7 +161,9 @@ export function RunNewCycloneTab() {
               id="landfall_location"
               placeholder="Satkhira"
               value={meta.landfall_location ?? ""}
-              onChange={(e) => setMeta({ ...meta, landfall_location: e.target.value })}
+              onChange={(e) =>
+                setMeta({ ...meta, landfall_location: e.target.value })
+              }
             />
           </div>
 
@@ -159,7 +175,9 @@ export function RunNewCycloneTab() {
               inputMode="numeric"
               placeholder="111"
               value={meta.max_wind_speed ?? ""}
-              onChange={(e) => setMeta({ ...meta, max_wind_speed: e.target.value })}
+              onChange={(e) =>
+                setMeta({ ...meta, max_wind_speed: e.target.value })
+              }
             />
           </div>
 
@@ -242,10 +260,13 @@ export function RunNewCycloneTab() {
 
       <Card title="Recent runs" subtitle="Newest first" bodyClassName="p-0">
         {runs.isLoading ? (
-          <p className="px-5 py-8 text-center text-sm text-muted-foreground">Loading…</p>
+          <p className="px-5 py-8 text-center text-sm text-muted-foreground">
+            Loading…
+          </p>
         ) : (runs.data?.length ?? 0) === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">
-            No runs yet. The cyclones shipped with the model are under Stored Cyclones.
+            No runs yet. The cyclones shipped with the model are under Stored
+            Cyclones.
           </p>
         ) : (
           <ul className="divide-y divide-border">
@@ -260,8 +281,10 @@ export function RunNewCycloneTab() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {new Date(run.created_at).toLocaleString()}
-                    {run.row_count !== null && ` · ${run.row_count.toLocaleString()} unions`}
-                    {run.took_ms !== null && ` · ${Math.round(run.took_ms / 1000)}s`}
+                    {run.row_count !== null &&
+                      ` · ${run.row_count.toLocaleString()} unions`}
+                    {run.took_ms !== null &&
+                      ` · ${Math.round(run.took_ms / 1000)}s`}
                   </p>
                   {run.error && (
                     <p className="mt-1 max-w-xl text-xs leading-relaxed text-destructive">
@@ -311,7 +334,12 @@ function FilePicker({
           <FileUp className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
         )}
       </div>
-      <Input id={id} type="file" onChange={onChange} className="mt-2 h-auto py-1.5 text-xs" />
+      <Input
+        id={id}
+        type="file"
+        onChange={onChange}
+        className="mt-2 h-auto py-1.5 text-xs"
+      />
     </div>
   );
 }
@@ -334,16 +362,17 @@ function RunProgress({ run }: { run: CCMRun }) {
       {inFlight && (
         <div className="flex items-center gap-3 text-sm text-navy-700">
           <Loader2 className="size-4 animate-spin text-muted-foreground" />
-          Joining the simulation grid against 1,585 union boundaries — usually a few minutes.
+          Joining the simulation grid against 1,585 union boundaries — usually a
+          few minutes.
         </div>
       )}
 
       {run.status === "succeeded" && (
         <p className="text-sm text-navy-700">
           {run.row_count?.toLocaleString()} unions computed
-          {run.took_ms ? ` in ${Math.round(run.took_ms / 1000)} seconds` : ""}. Switch to{" "}
-          <strong>Stored Cyclones</strong> and pick {run.cyclone_name ?? run.cyclone_code} to see
-          the map and table.
+          {run.took_ms ? ` in ${Math.round(run.took_ms / 1000)} seconds` : ""}.
+          Switch to <strong>Stored Cyclones</strong> and pick{" "}
+          {run.cyclone_name ?? run.cyclone_code} to see the map and table.
         </p>
       )}
 
@@ -351,12 +380,15 @@ function RunProgress({ run }: { run: CCMRun }) {
         <div className="flex gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-destructive" />
           <div className="min-w-0 text-xs leading-relaxed">
-            <p className="font-medium text-destructive">The model rejected this run</p>
+            <p className="font-medium text-destructive">
+              The model rejected this run
+            </p>
             <p className="mt-1 break-words text-navy-700">{run.error}</p>
             <p className="mt-2 text-muted-foreground">
-              Most often this is a file in an unexpected shape — a grid with a different number of
-              header lines, or a track missing one of its sidecar files. Nothing was saved, so
-              correcting the file and running again is safe.
+              Most often this is a file in an unexpected shape — a grid with a
+              different number of header lines, or a track missing one of its
+              sidecar files. Nothing was saved, so correcting the file and
+              running again is safe.
             </p>
           </div>
         </div>

@@ -46,6 +46,16 @@ class CCMUnion(Base):
     upazila: Mapped[str] = mapped_column(String(100))
     union_name: Mapped[str] = mapped_column(String(150))
     geom: Mapped[object] = mapped_column(Geometry("MULTIPOLYGON", srid=4326, spatial_index=True))
+
+    # The union's own historical affected-people distribution, in log space:
+    # mean and standard deviation of ln(affected people) across its record.
+    # These describe the place, not any one cyclone, which is why they sit
+    # here. The return-period trigger reads them to work out what a 1-in-T-year
+    # event looks like *for this union* — 10,000 people is an ordinary season
+    # beside Dhaka and an unprecedented disaster on a char.
+    ln_affected_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ln_affected_std: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

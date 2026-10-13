@@ -5,6 +5,7 @@ recompute anything — it stores, filters, aggregates and serves the model's own
 output. Rows arrive either from the shipped cyclone database or from a result
 file uploaded later through the portal.
 """
+import json
 from typing import Any
 
 from sqlalchemy import text
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import NotFoundError
 from app.modules.ccm import metrics as metric_registry
+from app.modules.ccm import neap
 from app.modules.ccm.schemas import AdminLevel, Operator
 
 #: Aggregation function per metric, used when viewing above union level.
@@ -32,6 +34,46 @@ _OPERATOR_SQL: dict[str, str] = {
     "lt": "<",
     "eq": "=",
 }
+
+#: The metric a return-period threshold is expressed against. The desktop tool
+#: offers "Return Period in Years" only under the affected-people trigger,
+#: because the per-union Avg/Std it needs describe that one quantity.
+RETURN_PERIOD_METRIC = "affected_people"
+
+
+def gumbel_reduced_variate(return_period_years: float) -> float:
+    """The Gumbel reduced variate for a T-year event, as CCM_Main.py computes it.
+
+    Extreme values — the worst flood in T years, the worst wind — follow a
+    Gumbel distribution rather than a normal one, and this is the standard
+    Weibull-plotting-position approximation of its quantile:
+
+        zt = ((1 - 1/T)**0.135 - (1/T)**0.135) / 0.1975
+
+    Paired with the union's own log-mean and log-sd it gives that union's
+    expected T-year affected-people count. T must be above 1: a return period
+    of one year or less is every year, which the distribution has no quantile
+    for.
+    """
+    if return_period_years <= 1:
+        raise ValueError("Return period must be greater than 1 year.")
+    p = 1.0 / return_period_years
+    return ((1 - p) ** 0.135 - p**0.135) / 0.1975
+
+
+def _return_period_clause(params: dict[str, Any], years: float) -> str:
+    """A WHERE fragment keeping unions this cyclone hits harder than their T-year event.
+
+    Applied to the union rows *before* any roll-up, which is the only reading
+    that makes sense: the question is which places are having an exceptional
+    event, and a district is not a place with its own return period.
+    """
+    params["rp_zt"] = gumbel_reduced_variate(years)
+    return (
+        f"r.{RETURN_PERIOD_METRIC} IS NOT NULL"
+        " AND u.ln_affected_avg IS NOT NULL AND u.ln_affected_std IS NOT NULL"
+        f" AND r.{RETURN_PERIOD_METRIC} >= EXP(u.ln_affected_avg + :rp_zt * u.ln_affected_std)"
+    )
 
 
 def _metric_select_sql(level: AdminLevel) -> str:
@@ -159,12 +201,24 @@ async def results(
     metric: str | None = None,
     operator: Operator | None = None,
     threshold: float | None = None,
+    threshold_mode: str = "value",
+    lead_time_hours: int | None = None,
     page: int = 1,
     size: int = 50,
 ) -> dict:
-    """The results table, at the requested administrative level."""
+    """The results table, at the requested administrative level.
+
+    `threshold_mode` picks how `threshold` is read. "value" compares the
+    trigger metric against it directly. "return_period" reads it as a number
+    of years and keeps only the unions where this cyclone beats their own
+    T-year event — see `_return_period_clause`.
+
+    `lead_time_hours` adds the NEAP impact numbers to every row, the same four
+    columns the desktop tool appends once a lead time is entered.
+    """
     cyclone = await get_cyclone(db, code)
     chosen = metric_registry.resolve(metric)
+    lead_time = neap.clamp_lead_time(lead_time_hours)
 
     params: dict[str, Any] = {
         "cyclone_id": cyclone["id"],
@@ -176,17 +230,28 @@ async def results(
     id_select = ", ".join(f"r.{c}" for c in group_columns)
     group_by = "" if level == "union" else f"GROUP BY {', '.join(f'r.{c}' for c in group_columns)}"
 
+    # A return-period threshold is per union and so has to be applied to the
+    # raw rows, before any roll-up; an ordinary threshold is applied to what
+    # the operator is actually looking at, so it runs after.
+    row_where = _filters(params)
+    having = ""
+    if threshold_mode == "return_period":
+        # A period of a year or less has no quantile, so there is nothing to
+        # compare against and nothing is filtered. Falling through to the flat
+        # comparison instead would silently read "1" as "one person affected".
+        if threshold is not None and threshold > 1:
+            row_where += " AND " + _return_period_clause(params, float(threshold))
+    elif threshold is not None and operator in _OPERATOR_SQL:
+        having = f"WHERE agg.{chosen.key} {_OPERATOR_SQL[operator]} :threshold"
+        params["threshold"] = threshold
+
     base = f"""
         SELECT {id_select}, {_metric_select_sql(level)}
         FROM ccm.results r
-        WHERE {_filters(params)}
+        LEFT JOIN ccm.unions u ON u.union_geo = r.union_geo
+        WHERE {row_where}
         {group_by}
     """
-
-    having = ""
-    if threshold is not None and operator in _OPERATOR_SQL:
-        having = f"WHERE agg.{chosen.key} {_OPERATOR_SQL[operator]} :threshold"
-        params["threshold"] = threshold
 
     count_sql = f"SELECT COUNT(*) FROM ({base}) agg {having}"
     total = (await db.execute(text(count_sql), params)).scalar_one()
@@ -212,11 +277,12 @@ async def results(
     rows = await db.execute(text(page_sql), params)
 
     return {
-        "items": [dict(r) for r in rows.mappings()],
+        "items": [neap.annotate(dict(r), lead_time) for r in rows.mappings()],
         "total": int(total),
         "page": max(page, 1),
         "size": params["limit"],
         "level": level,
+        "lead_time_hours": lead_time,
         "metric": chosen.key,
         "metric_min": float(bounds["lo"]) if bounds and bounds["lo"] is not None else None,
         "metric_max": float(bounds["hi"]) if bounds and bounds["hi"] is not None else None,
@@ -228,14 +294,28 @@ async def map_features(
     *,
     code: str,
     metric: str | None = None,
+    level: AdminLevel = "union",
     division: str | None = None,
     district: str | None = None,
     upazila: str | None = None,
     operator: Operator | None = None,
     threshold: float | None = None,
+    threshold_mode: str = "value",
     simplify: float = 0.001,
 ) -> dict:
-    """Union polygons with the selected metric attached, as GeoJSON.
+    """Polygons for the chosen administrative level, with the metric attached.
+
+    The level is the map, not just the table. Asked for districts, this returns
+    64-odd district polygons dissolved from their unions and coloured by the
+    district's own aggregated figure — not union polygons with a district
+    outline drawn over them. Union lines inside a district are not faint detail
+    at that level, they are wrong: they invite reading a value off a union when
+    the number on screen is the district's.
+
+    Dissolving from the same union polygons the choropleth uses at union level,
+    rather than loading separate district shapefiles, is what keeps the levels
+    consistent. Two boundary datasets never agree to the metre, and a district
+    fill that misses the unions it contains by a few pixels looks like a bug.
 
     Geometry is simplified server-side — union boundaries at full precision are
     ~40 MB of GeoJSON, which no browser should be asked to swallow.
@@ -250,7 +330,7 @@ async def map_features(
     exactly the coverage being drawn.
 
     The third argument, simplifyBoundary, is false: only the *interior* edges
-    between neighbouring unions are simplified, and the outer edge of the
+    between neighbouring areas are simplified, and the outer edge of the
     coverage is left at full precision. That outer edge is the coastline, the
     estuary mouths and the char islands — the parts an operator reads the map
     by. Simplifying those too saves little (they are a small share of the
@@ -270,34 +350,77 @@ async def map_features(
         "simplify": max(0.0, min(simplify, 0.05)),
     }
     where = _filters(params)
-    if threshold is not None and operator in _OPERATOR_SQL:
+    if threshold_mode == "return_period":
+        if threshold is not None and threshold > 1:
+            where += " AND " + _return_period_clause(params, float(threshold))
+    elif threshold is not None and operator in _OPERATOR_SQL:
         where += f" AND r.{chosen.key} {_OPERATOR_SQL[operator]} :threshold"
         params["threshold"] = threshold
 
+    # The extra metrics ride along so clicking an area can show its headline
+    # figures without a second request.
+    detail_metrics = (
+        "risk_pct", "hazard_pct", "vulnerability_pct",
+        "wind_speed_kmh", "surge_height_m", "affected_people",
+    )
+
+    if level == "union":
+        label_columns = ["division", "district", "upazila", "union_name"]
+        value_sql = f"r.{chosen.key} AS value"
+        detail_sql = ", ".join(f"r.{m}" for m in detail_metrics)
+        geom_source = "u.geom"
+        group_by = ""
+        id_column = "r.union_geo"
+    else:
+        label_columns = _LEVEL_COLUMNS[level]
+        value_sql = f"{_AGG_SQL[chosen.aggregation]}(r.{chosen.key}) AS value"
+        detail_sql = ", ".join(
+            f"{_AGG_SQL[metric_registry.METRICS_BY_KEY[m].aggregation]}(r.{m}) AS {m}"
+            for m in detail_metrics
+        )
+        # One polygon per area. ST_UnaryUnion over the collected unions melts
+        # the internal lines away, which is the whole point of the level.
+        geom_source = "ST_UnaryUnion(ST_Collect(u.geom))"
+        group_by = f"GROUP BY {', '.join(f'r.{c}' for c in label_columns)}"
+        # The area's full path, not just its own name: there are Sadar upazilas
+        # in most districts, so an id of "Sadar" would be several different
+        # polygons sharing one feature id. The map's cache key hashes these,
+        # and two areas that hash alike keep the previous one's colours.
+        id_column = " || ' / ' || ".join(f"r.{c}" for c in label_columns)
+
+    label_sql = ", ".join(f"r.{c}" for c in label_columns)
     geom_sql = (
-        "ST_CoverageSimplify(u.geom, :simplify, false) OVER ()"
+        "ST_CoverageSimplify(geom, :simplify, false) OVER ()"
         if params["simplify"] > 0
-        else "u.geom"
+        else "geom"
     )
 
     rows = await db.execute(
         text(
             f"""
-            SELECT r.union_geo,
-                   r.division, r.district, r.upazila, r.union_name,
-                   r.{chosen.key} AS value,
-                   r.risk_pct, r.hazard_pct, r.vulnerability_pct,
-                   r.wind_speed_kmh, r.surge_height_m, r.affected_people,
-                   ST_AsGeoJSON({geom_sql}, 5) AS geometry
-            FROM ccm.results r
-            JOIN ccm.unions u ON u.union_geo = r.union_geo
-            WHERE {where}
+            WITH areas AS (
+                SELECT {id_column} AS feature_id, {label_sql},
+                       {value_sql}, {detail_sql},
+                       {geom_source} AS geom
+                FROM ccm.results r
+                JOIN ccm.unions u ON u.union_geo = r.union_geo
+                WHERE {where}
+                {group_by}
+            ), simplified AS (
+                SELECT feature_id, {label_sql.replace("r.", "")},
+                       value, {", ".join(detail_metrics)},
+                       {geom_sql} AS geom
+                FROM areas r
+            )
+            SELECT feature_id, {label_sql.replace("r.", "")},
+                   value, {", ".join(detail_metrics)},
+                   ST_AsGeoJSON(geom, 5) AS geometry
+            FROM simplified
+            WHERE geom IS NOT NULL
             """
         ),
         params,
     )
-
-    import json
 
     features: list[dict] = []
     lo: float | None = None
@@ -307,31 +430,29 @@ async def map_features(
         if value is not None:
             lo = value if lo is None else min(lo, value)
             hi = value if hi is None else max(hi, value)
+
+        properties: dict[str, Any] = {"level": level, "value": value}
+        for column in label_columns:
+            properties[column] = row[column]
+        # Union level keys on Union_Geo; above it, on the area's own name.
+        properties["union_geo"] = row["feature_id"] if level == "union" else None
+        properties["area_name"] = row[label_columns[-1]]
+        for key in detail_metrics:
+            properties[key] = row[key]
+
         features.append(
             {
                 "type": "Feature",
-                "id": row["union_geo"],
+                "id": row["feature_id"],
                 "geometry": json.loads(row["geometry"]),
-                "properties": {
-                    "union_geo": row["union_geo"],
-                    "division": row["division"],
-                    "district": row["district"],
-                    "upazila": row["upazila"],
-                    "union_name": row["union_name"],
-                    "value": value,
-                    "risk_pct": row["risk_pct"],
-                    "hazard_pct": row["hazard_pct"],
-                    "vulnerability_pct": row["vulnerability_pct"],
-                    "wind_speed_kmh": row["wind_speed_kmh"],
-                    "surge_height_m": row["surge_height_m"],
-                    "affected_people": row["affected_people"],
-                },
+                "properties": properties,
             }
         )
 
     return {
         "type": "FeatureCollection",
         "features": features,
+        "level": level,
         "metric": chosen.key,
         "metric_label": chosen.label,
         "metric_unit": chosen.unit,
@@ -409,8 +530,6 @@ async def boundaries(
         params,
     )
 
-    import json
-
     features = [
         {
             "type": "Feature",
@@ -427,3 +546,47 @@ async def boundaries(
         "level": level,
         "feature_count": len(features),
     }
+
+
+async def get_track(db: AsyncSession, code: str) -> dict:
+    """The cyclone's track, as a GeoJSON FeatureCollection.
+
+    The CCM package ships one shapefile per cyclone and the desktop tool drew
+    it in red over the choropleth. The portal stores it on the cyclone row at
+    import time, so the browser gets the line without ever seeing a shapefile.
+
+    A cyclone imported before tracks were loaded has none; that is an empty
+    collection rather than a 404, because the map should simply draw no line.
+    """
+    row = (
+        await db.execute(
+            text("SELECT track_geojson FROM ccm.cyclones WHERE code = :code"),
+            {"code": code},
+        )
+    ).mappings().first()
+    if row is None:
+        raise NotFoundError(f"No cyclone with code '{code}'.")
+
+    track = row["track_geojson"]
+    if not track:
+        return {"type": "FeatureCollection", "features": [], "feature_count": 0}
+
+    features = track.get("features", []) if isinstance(track, dict) else []
+    return {
+        "type": "FeatureCollection",
+        "features": features,
+        "feature_count": len(features),
+    }
+
+
+async def export_rows(db: AsyncSession, **kwargs: Any) -> dict:
+    """Every row the current filters select, for a file download.
+
+    The table in the browser is paged; a download of one page is useless, so
+    this re-runs the same query with the page cap lifted. The ceiling is the
+    1,585 unions the model reports on, well inside what a single response and
+    a spreadsheet can carry.
+    """
+    kwargs.pop("page", None)
+    kwargs.pop("size", None)
+    return await results(db, page=1, size=2000, **kwargs)

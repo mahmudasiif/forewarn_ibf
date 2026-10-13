@@ -8,6 +8,20 @@ import { api } from "@/lib/api";
 export type AdminLevel = "union" | "upazila" | "district" | "division";
 export type Operator = "gte" | "gt" | "lte" | "lt" | "eq";
 
+/**
+ * How the trigger threshold is read.
+ *
+ * "value" compares the trigger metric to the number typed. "return_period"
+ * reads the number as years and keeps only the unions where this cyclone beats
+ * their own 1-in-T-year event — 10,000 people affected is an ordinary season
+ * for a large mainland union and an unprecedented disaster on a char, and the
+ * return period is what tells those two apart.
+ */
+export type ThresholdMode = "value" | "return_period";
+
+/** The return period only has per-union statistics for this one metric. */
+export const RETURN_PERIOD_METRIC = "affected_people";
+
 export type Cyclone = {
   id: number;
   code: string;
@@ -37,7 +51,11 @@ export type Metric = {
   description: string;
 };
 
-export type LocationOption = { value: string; label: string; parent: string | null };
+export type LocationOption = {
+  value: string;
+  label: string;
+  parent: string | null;
+};
 
 export type ResultRow = {
   union_geo: number | null;
@@ -53,6 +71,8 @@ export type ResultPage = {
   page: number;
   size: number;
   level: AdminLevel;
+  /** the lead time the NEAP columns on these rows were classified at */
+  lead_time_hours: number | null;
   metric: string;
   metric_min: number | null;
   metric_max: number | null;
@@ -61,11 +81,19 @@ export type ResultPage = {
 export type MapResponse = {
   type: "FeatureCollection";
   features: Feature[];
+  /** which administrative level the polygons are */
+  level: AdminLevel;
   metric: string;
   metric_label: string;
   metric_unit: string;
   metric_min: number | null;
   metric_max: number | null;
+  feature_count: number;
+};
+
+export type TrackResponse = {
+  type: "FeatureCollection";
+  features: Feature[];
   feature_count: number;
 };
 
@@ -91,6 +119,13 @@ export type CCMFilters = {
   triggerMetric: string;
   operator: Operator;
   threshold: number | null;
+  /** how `threshold` is read — a flat value, or a return period in years */
+  thresholdMode: ThresholdMode;
+  /**
+   * Hours of warning before landfall. Drives the NEAP impact numbers: the same
+   * hazard scores lower the earlier it is known, because there is time to act.
+   */
+  leadTimeHours: number;
 };
 
 export const DEFAULT_FILTERS: Omit<CCMFilters, "cyclone"> = {
@@ -102,11 +137,16 @@ export const DEFAULT_FILTERS: Omit<CCMFilters, "cyclone"> = {
   triggerMetric: "risk_pct",
   operator: "gte",
   threshold: null,
+  thresholdMode: "value",
+  // What CCM_Main.py puts in its own lead-time box when left empty.
+  leadTimeHours: 120,
 };
 
 /* ----------------------------------------------------------------- params */
 
-function locationParams(f: Pick<CCMFilters, "division" | "district" | "upazila">) {
+function locationParams(
+  f: Pick<CCMFilters, "division" | "district" | "upazila">,
+) {
   return {
     division: f.division ?? undefined,
     district: f.district ?? undefined,
@@ -121,7 +161,20 @@ function locationParams(f: Pick<CCMFilters, "division" | "district" | "upazila">
  */
 function triggerParams(f: CCMFilters) {
   if (f.threshold === null || Number.isNaN(f.threshold)) return {};
-  return { metric: f.triggerMetric, operator: f.operator, threshold: f.threshold };
+  if (f.thresholdMode === "return_period") {
+    // The comparison is against each union's own expected T-year figure, so
+    // there is no operator to send — only the period itself.
+    return {
+      metric: RETURN_PERIOD_METRIC,
+      threshold: f.threshold,
+      threshold_mode: "return_period",
+    };
+  }
+  return {
+    metric: f.triggerMetric,
+    operator: f.operator,
+    threshold: f.threshold,
+  };
 }
 
 /* ----------------------------------------------------------------- hooks */
@@ -132,10 +185,20 @@ export const ccmKeys = {
   cyclone: (code: string) => ["ccm", "cyclone", code] as const,
   locations: (code: string, level: string, parent?: string | null) =>
     ["ccm", "locations", code, level, parent ?? null] as const,
-  results: (f: CCMFilters, page: number) => ["ccm", "results", f, page] as const,
+  results: (f: CCMFilters, page: number) =>
+    ["ccm", "results", f, page] as const,
   map: (f: CCMFilters) => ["ccm", "map", f] as const,
+  track: (code: string) => ["ccm", "track", code] as const,
   boundaries: (code: string, level: BoundaryLevel, f: CCMFilters) =>
-    ["ccm", "boundaries", code, level, f.division, f.district, f.upazila] as const,
+    [
+      "ccm",
+      "boundaries",
+      code,
+      level,
+      f.division,
+      f.district,
+      f.upazila,
+    ] as const,
 };
 
 export function useMetrics() {
@@ -157,7 +220,8 @@ export function useCyclones() {
 export function useCyclone(code: string | null) {
   return useQuery({
     queryKey: ccmKeys.cyclone(code ?? ""),
-    queryFn: async () => (await api.get<CycloneDetail>(`/ccm/cyclones/${code}`)).data,
+    queryFn: async () =>
+      (await api.get<CycloneDetail>(`/ccm/cyclones/${code}`)).data,
     enabled: Boolean(code),
   });
 }
@@ -189,6 +253,7 @@ export function useResults(filters: CCMFilters, page: number, size = 50) {
             level: filters.level,
             ...locationParams(filters),
             ...triggerParams(filters),
+            lead_time_hours: filters.leadTimeHours,
             page,
             size,
           },
@@ -199,6 +264,20 @@ export function useResults(filters: CCMFilters, page: number, size = 50) {
   });
 }
 
+/**
+ * How hard to simplify the polygons for the current view.
+ *
+ * The cost is the number of vertices leaving the database, which depends on
+ * how many areas are drawn, not on how big they are. Above union level there
+ * are tens of shapes rather than 1,585, so they can be drawn nearly exactly;
+ * at union level across the whole coast the tolerance has to be loosened or
+ * the payload gets unreasonable.
+ */
+function mapSimplify(filters: CCMFilters): number {
+  if (filters.level !== "union") return 0.0002;
+  return filters.district ? 0.0003 : 0.0015;
+}
+
 export function useMapData(filters: CCMFilters, enabled = true) {
   return useQuery({
     queryKey: ccmKeys.map(filters),
@@ -207,11 +286,17 @@ export function useMapData(filters: CCMFilters, enabled = true) {
         await api.get<MapResponse>(`/ccm/cyclones/${filters.cyclone}/map`, {
           params: {
             metric: filters.metric,
+            // The level is the map, not only the table: at district level the
+            // API returns dissolved district polygons, so the union lines
+            // inside them are gone rather than drawn over a district figure.
+            level: filters.level,
             ...locationParams(filters),
             ...triggerParams(filters),
             // Union boundaries at full precision are ~40 MB of GeoJSON, so the
-            // API simplifies them. Loosen it when the whole country is in view.
-            simplify: filters.district ? 0.0003 : 0.0015,
+            // API simplifies them. Loosen it when the whole country is in
+            // view, and tighten it above union level — a handful of dissolved
+            // areas is cheap, and their edges are the only edges on screen.
+            simplify: mapSimplify(filters),
           },
         })
       ).data,
@@ -249,16 +334,43 @@ export function useBoundaries(
 }
 
 /** URL for the CSV export — the web equivalent of the tool's "Save Table". */
-export function resultsCsvUrl(filters: CCMFilters): string {
+/**
+ * A download link for the table as it is currently filtered.
+ *
+ * The browser's table is paged; the download is not — the API re-runs the same
+ * query with the page cap lifted, so the file holds every matching row.
+ */
+export function resultsDownloadUrl(
+  filters: CCMFilters,
+  format: "csv" | "xlsx",
+): string {
   const base = api.defaults.baseURL ?? "";
   const params = new URLSearchParams({ level: filters.level });
   for (const [key, value] of Object.entries({
     ...locationParams(filters),
     ...triggerParams(filters),
+    lead_time_hours: filters.leadTimeHours,
   })) {
     if (value !== undefined && value !== null) params.set(key, String(value));
   }
-  return `${base}/ccm/cyclones/${filters.cyclone}/results.csv?${params.toString()}`;
+  return `${base}/ccm/cyclones/${filters.cyclone}/results.${format}?${params.toString()}`;
+}
+
+/**
+ * The cyclone's track line.
+ *
+ * Its own query, keyed on the cyclone alone: the track does not move when the
+ * metric, the area or the threshold changes, so it is fetched once and stays
+ * cached while the operator works through the rest of the panel.
+ */
+export function useTrack(code: string | null) {
+  return useQuery({
+    queryKey: ccmKeys.track(code ?? ""),
+    queryFn: async () =>
+      (await api.get<TrackResponse>(`/ccm/cyclones/${code}/track`)).data,
+    enabled: Boolean(code),
+    staleTime: Infinity,
+  });
 }
 
 /* -------------------------------------------------------------- model runs */
@@ -280,14 +392,49 @@ export type CCMRun = {
 
 /** The simulation files a run needs. `required` drives the form's validation. */
 export const RUN_FILE_FIELDS = [
-  { field: "water_depth_xyz", label: "Water Depth", hint: "Water Depth.xyz", required: true },
-  { field: "wind_speed_xyz", label: "Wind Speed", hint: "Wind Speed.xyz", required: true },
+  {
+    field: "water_depth_xyz",
+    label: "Water Depth",
+    hint: "Water Depth.xyz",
+    required: true,
+  },
+  {
+    field: "wind_speed_xyz",
+    label: "Wind Speed",
+    hint: "Wind Speed.xyz",
+    required: true,
+  },
   { field: "rain_csv", label: "Rainfall", hint: "Rain.csv", required: true },
-  { field: "track_shp", label: "Track — .shp", hint: "Track.shp", required: true },
-  { field: "track_shx", label: "Track — .shx", hint: "Track.shx", required: true },
-  { field: "track_dbf", label: "Track — .dbf", hint: "Track.dbf", required: true },
-  { field: "track_prj", label: "Track — .prj", hint: "Track.prj", required: false },
-  { field: "track_cpg", label: "Track — .cpg", hint: "Track.cpg", required: false },
+  {
+    field: "track_shp",
+    label: "Track — .shp",
+    hint: "Track.shp",
+    required: true,
+  },
+  {
+    field: "track_shx",
+    label: "Track — .shx",
+    hint: "Track.shx",
+    required: true,
+  },
+  {
+    field: "track_dbf",
+    label: "Track — .dbf",
+    hint: "Track.dbf",
+    required: true,
+  },
+  {
+    field: "track_prj",
+    label: "Track — .prj",
+    hint: "Track.prj",
+    required: false,
+  },
+  {
+    field: "track_cpg",
+    label: "Track — .cpg",
+    hint: "Track.cpg",
+    required: false,
+  },
 ] as const;
 
 /**
@@ -295,9 +442,21 @@ export const RUN_FILE_FIELDS = [
  * model derives it from. Exactly one of these two groups is needed.
  */
 export const THRUST_FORCE_FIELDS = [
-  { field: "thrust_force_csv", label: "Thrust Force (pre-computed)", hint: "Thrush Force.csv" },
-  { field: "water_depth_tf_xyz", label: "Water Depth (TF grid)", hint: "Water Depth-TF.xyz" },
-  { field: "wind_speed_tf_xyz", label: "Wind Speed (TF grid)", hint: "Wind Speed-TF.xyz" },
+  {
+    field: "thrust_force_csv",
+    label: "Thrust Force (pre-computed)",
+    hint: "Thrush Force.csv",
+  },
+  {
+    field: "water_depth_tf_xyz",
+    label: "Water Depth (TF grid)",
+    hint: "Water Depth-TF.xyz",
+  },
+  {
+    field: "wind_speed_tf_xyz",
+    label: "Wind Speed (TF grid)",
+    hint: "Wind Speed-TF.xyz",
+  },
   {
     field: "depth_avg_velocity_tf_xyz",
     label: "Depth-Averaged Velocity (TF grid)",
@@ -334,10 +493,13 @@ export async function startRun(
 export function useRuns(limit = 20) {
   return useQuery({
     queryKey: ["ccm", "runs", limit] as const,
-    queryFn: async () => (await api.get<CCMRun[]>("/ccm/runs", { params: { limit } })).data,
+    queryFn: async () =>
+      (await api.get<CCMRun[]>("/ccm/runs", { params: { limit } })).data,
     // A run in flight should show progress without the operator reloading.
     refetchInterval: (query) =>
-      (query.state.data ?? []).some((r) => r.status === "queued" || r.status === "running")
+      (query.state.data ?? []).some(
+        (r) => r.status === "queued" || r.status === "running",
+      )
         ? 5_000
         : false,
   });

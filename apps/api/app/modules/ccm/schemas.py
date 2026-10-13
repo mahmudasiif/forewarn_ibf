@@ -6,6 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 AdminLevel = Literal["union", "upazila", "district", "division"]
 Operator = Literal["gte", "gt", "lte", "lt", "eq"]
+#: How a trigger threshold is read. "value" compares the metric to the number
+#: given; "return_period" reads the number as years and keeps only the unions
+#: where this cyclone exceeds their own 1-in-T-year event.
+ThresholdMode = Literal["value", "return_period"]
 
 
 class CycloneSummary(BaseModel):
@@ -79,6 +83,14 @@ class ResultRow(BaseModel):
     vulnerability_pct: float | None = None
     risk_pct: float | None = None
 
+    # NEAP classification. How bad the hazard is *given the warning time* —
+    # the same wind scores 16 with no notice and 8 with five days'. Echoed on
+    # every row so a downloaded table carries the lead time it was read at.
+    lead_time_hours: int | None = None
+    neap_wind: int | None = None
+    neap_surge: int | None = None
+    neap_rain: int | None = None
+
 
 class ResultPage(BaseModel):
     items: list[ResultRow]
@@ -87,6 +99,8 @@ class ResultPage(BaseModel):
     size: int
     level: AdminLevel
     metric: str
+    #: the lead time the NEAP columns on these rows were classified at
+    lead_time_hours: int | None = None
     #: min/max of the selected metric across the filtered set — drives the map legend
     metric_min: float | None = None
     metric_max: float | None = None
@@ -97,11 +111,21 @@ class MapResponse(BaseModel):
 
     type: Literal["FeatureCollection"] = "FeatureCollection"
     features: list[dict[str, Any]]
+    #: which administrative level the polygons are
+    level: AdminLevel = "union"
     metric: str
     metric_label: str
     metric_unit: str
     metric_min: float | None = None
     metric_max: float | None = None
+    feature_count: int = 0
+
+
+class TrackResponse(BaseModel):
+    """The cyclone's track line. Empty when the cyclone was imported without one."""
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[dict[str, Any]]
     feature_count: int = 0
 
 

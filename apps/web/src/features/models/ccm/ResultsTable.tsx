@@ -33,6 +33,37 @@ const CONDITIONS = [
   { key: "agri_land_damage", label: "Agri. land" },
 ];
 
+/**
+ * The NEAP impact numbers — what the desktop tool appends once a lead time is
+ * entered. Short headers because these three sit side by side and the full
+ * names ("NEAP Risk Impact Number for Storm Surge") are four times the width
+ * of the number underneath; the group header above them carries the meaning,
+ * and each cell has a title for the rest.
+ */
+const NEAP_COLUMNS = [
+  { key: "neap_wind", label: "W", title: "NEAP impact number — wind" },
+  {
+    key: "neap_surge",
+    label: "St.Su",
+    title: "NEAP impact number — storm surge",
+  },
+  { key: "neap_rain", label: "RF", title: "NEAP impact number — rainfall" },
+];
+
+/**
+ * Colour the impact number by how bad it is. The scale runs 0–16 and the
+ * protocol's action tiers break roughly in quarters, so the severity tokens
+ * map onto it directly rather than through a continuous ramp.
+ */
+function neapTone(value: number | null): string {
+  if (value === null || value === undefined) return "text-muted-foreground";
+  if (value >= 13) return "font-semibold text-severity-extreme";
+  if (value >= 9) return "font-semibold text-severity-severe";
+  if (value >= 5) return "font-medium text-severity-moderate";
+  if (value >= 1) return "text-severity-advisory";
+  return "text-muted-foreground";
+}
+
 function locationColumns(level: AdminLevel): { key: string; label: string }[] {
   switch (level) {
     case "division":
@@ -76,15 +107,27 @@ type ResultsTableProps = {
   onPageChange: (page: number) => void;
 };
 
-export function ResultsTable({ data, metrics, loading, page, onPageChange }: ResultsTableProps) {
+export function ResultsTable({
+  data,
+  metrics,
+  loading,
+  page,
+  onPageChange,
+}: ResultsTableProps) {
   if (loading && !data) {
-    return <div className="px-6 py-12 text-center text-sm text-muted-foreground">Loading…</div>;
+    return (
+      <div className="px-6 py-12 text-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
   }
   if (!data || data.items.length === 0) {
     return (
       <div className="px-6 py-12 text-center">
         <p className="text-sm font-medium">Nothing matches</p>
-        <p className="mt-1 text-xs text-muted-foreground">Try a lower threshold.</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Try a lower threshold.
+        </p>
       </div>
     );
   }
@@ -122,28 +165,54 @@ export function ResultsTable({ data, metrics, loading, page, onPageChange }: Res
             {CONDITIONS.map((condition) => (
               <TableHead key={condition.key}>{condition.label}</TableHead>
             ))}
+            {NEAP_COLUMNS.map((column) => (
+              <TableHead key={column.key} numeric title={column.title}>
+                {column.label}
+                <span className="block font-normal normal-case tracking-normal">
+                  NEAP
+                </span>
+              </TableHead>
+            ))}
           </TableRow>
         </TableHeader>
         <TableBody>
           {data.items.map((row, index) => (
             <TableRow key={`${row.union_geo ?? ""}-${index}`}>
               {locCols.map((col) => (
-                <TableCell key={col.key}>{(row[col.key] as string) ?? "—"}</TableCell>
+                <TableCell key={col.key}>
+                  {(row[col.key] as string) ?? "—"}
+                </TableCell>
               ))}
               {valueCols.map((key) => (
                 <TableCell
                   key={key}
                   numeric
-                  className={cn(key === data.metric ? "font-medium" : "text-navy-700")}
+                  className={cn(
+                    key === data.metric ? "font-medium" : "text-navy-700",
+                  )}
                 >
                   {formatValue(row[key] as number)}
                 </TableCell>
               ))}
               {CONDITIONS.map((condition) => (
                 <TableCell key={condition.key}>
-                  <ConditionCell value={(row[condition.key] as string) ?? null} />
+                  <ConditionCell
+                    value={(row[condition.key] as string) ?? null}
+                  />
                 </TableCell>
               ))}
+              {NEAP_COLUMNS.map((column) => {
+                const value = (row[column.key] as number | null) ?? null;
+                return (
+                  <TableCell
+                    key={column.key}
+                    numeric
+                    className={neapTone(value)}
+                  >
+                    {value ?? "—"}
+                  </TableCell>
+                );
+              })}
             </TableRow>
           ))}
         </TableBody>
@@ -152,6 +221,9 @@ export function ResultsTable({ data, metrics, loading, page, onPageChange }: Res
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
         <p className="text-xs text-muted-foreground">
           {data.total.toLocaleString()} rows · page {page} of {totalPages}
+          {data.lead_time_hours !== null && (
+            <span> · NEAP at {data.lead_time_hours} hr lead time</span>
+          )}
           {loading && <span className="ml-2 text-navy-700">updating…</span>}
         </p>
         <div className="flex gap-1">
